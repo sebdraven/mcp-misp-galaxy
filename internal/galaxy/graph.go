@@ -1,0 +1,306 @@
+package galaxy
+
+import (
+	"encoding/json"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync/atomic"
+	"time"
+)
+
+// Graph is an immutable view of the MISP galaxy corpus. Every method is safe
+// for concurrent use because nothing mutates after Load returns.
+type Graph struct {
+	nodes    map[string]*Node // by UUID
+	index    map[string][]*Node
+	byGalaxy map[string][]*Node
+	galaxies map[string]GalaxyInfo
+	stats    Stats
+}
+
+// Holder carries the live graph and lets a reload swap it without locking
+// readers. Callers take the current graph once per request and keep using it;
+// a swap mid-request is harmless, the old graph stays valid.
+type Holder struct {
+	current atomic.Pointer[Graph]
+}
+
+// Get returns the live graph, or nil before the first successful load.
+func (h *Holder) Get() *Graph { return h.current.Load() }
+
+// Set publishes a new graph.
+func (h *Holder) Set(g *Graph) { h.current.Store(g) }
+
+// ProgressFunc receives load progress: a phase name, how many units are done
+// and how many there are in total. A total of 0 means the phase size is not
+// known ahead of time.
+//
+// The loader knows nothing about terminals or formatting — it reports, the
+// caller renders.
+type ProgressFunc func(phase string, done, total int)
+
+// LoadOption configures Load.
+type LoadOption func(*loadOpts)
+
+type loadOpts struct {
+	progress ProgressFunc
+}
+
+// WithProgress attaches a progress callback.
+func WithProgress(fn ProgressFunc) LoadOption {
+	return func(o *loadOpts) { o.progress = fn }
+}
+
+// Load reads clusters/ and galaxies/ under root (the misp-galaxy checkout) and
+// builds a graph. sourceRef is recorded in the stats for provenance — pass the
+// submodule commit so a result can always be traced back to a corpus state.
+func Load(root, sourceRef string, opts ...LoadOption) (*Graph, error) {
+	var o loadOpts
+	for _, fn := range opts {
+		fn(&o)
+	}
+	report := o.progress
+	if report == nil {
+		report = func(string, int, int) {}
+	}
+
+	clusterDir := filepath.Join(root, "clusters")
+	if _, err := os.Stat(clusterDir); err != nil {
+		return nil, fmt.Errorf("galaxy: no clusters/ under %s: %w", root, err)
+	}
+
+	g := &Graph{
+		nodes:    make(map[string]*Node, 1<<16),
+		index:    make(map[string][]*Node, 1<<16),
+		byGalaxy: make(map[string][]*Node),
+		galaxies: make(map[string]GalaxyInfo),
+	}
+
+	files, err := jsonFiles(clusterDir)
+	if err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("galaxy: clusters/ under %s holds no JSON", root)
+	}
+
+	// Pass 1 — every value becomes a node. Edges are held aside because a
+	// dest-uuid routinely points at a value defined in a file we have not read
+	// yet; wiring as we go would manufacture dangling nodes that are not.
+	type pending struct {
+		from string
+		rel  []relatedEntry
+	}
+	var deferred []pending
+
+	for i, path := range files {
+		report("clusters", i, len(files))
+		cf, err := readCluster(path)
+		if err != nil {
+			return nil, err
+		}
+		gtype := cf.Type
+		if gtype == "" {
+			// Fall back to the filename: a handful of clusters omit "type".
+			gtype = strings.TrimSuffix(filepath.Base(path), ".json")
+		}
+		if _, seen := g.galaxies[gtype]; !seen {
+			g.galaxies[gtype] = GalaxyInfo{Type: gtype, Name: cf.Name, Description: cf.Description}
+		}
+
+		for _, v := range cf.Values {
+			if v.UUID == "" {
+				continue // nothing to key on; the corpus has a few of these
+			}
+			n, exists := g.nodes[v.UUID]
+			if exists && !n.Dangling {
+				// Same UUID defined twice. Keep the first and move on rather
+				// than silently overwriting one definition with another.
+				continue
+			}
+			if !exists {
+				n = &Node{UUID: v.UUID}
+				g.nodes[v.UUID] = n
+			}
+			n.Value = v.Value
+			n.Galaxy = gtype
+			n.Description = v.Description
+			n.Meta = v.Meta
+			n.Revoked = v.Revoked
+			n.Synonyms = synonymsOf(v.Meta)
+			n.Dangling = false
+
+			g.byGalaxy[gtype] = append(g.byGalaxy[gtype], n)
+			if len(v.Related) > 0 {
+				deferred = append(deferred, pending{from: v.UUID, rel: v.Related})
+			}
+		}
+	}
+	report("clusters", len(files), len(files))
+
+	// Pass 2 — wire the edges, materialising ghosts only for targets that are
+	// genuinely absent from the whole corpus.
+	edges := 0
+	for i, p := range deferred {
+		if i%512 == 0 {
+			report("relations", i, len(deferred))
+		}
+		from := g.nodes[p.from]
+		for _, rel := range p.rel {
+			if rel.DestUUID == "" || rel.DestUUID == p.from {
+				continue
+			}
+			to, ok := g.nodes[rel.DestUUID]
+			if !ok {
+				to = &Node{UUID: rel.DestUUID, Dangling: true}
+				g.nodes[rel.DestUUID] = to
+			}
+			from.Out = append(from.Out, Edge{To: to, Type: rel.Type})
+			to.In = append(to.In, Edge{To: from, Type: rel.Type})
+			edges++
+		}
+	}
+
+	report("relations", len(deferred), len(deferred))
+
+	report("index", 0, len(g.nodes))
+	g.buildIndex()
+	report("index", len(g.nodes), len(g.nodes))
+	g.loadGalaxyDefs(filepath.Join(root, "galaxies"))
+
+	dangling, revoked := 0, 0
+	for _, n := range g.nodes {
+		if n.Dangling {
+			dangling++
+		}
+		if n.Revoked {
+			revoked++
+		}
+	}
+	for gt, ns := range g.byGalaxy {
+		info := g.galaxies[gt]
+		info.Type, info.Nodes = gt, len(ns)
+		g.galaxies[gt] = info
+	}
+
+	g.stats = Stats{
+		Nodes:       len(g.nodes),
+		Edges:       edges,
+		Dangling:    dangling,
+		Revoked:     revoked,
+		Galaxies:    len(g.galaxies),
+		IndexedKeys: len(g.index),
+		SourceRef:   sourceRef,
+		LoadedAt:    time.Now().UTC().Format(time.RFC3339),
+	}
+	return g, nil
+}
+
+// Stats returns the summary computed at load time.
+func (g *Graph) Stats() Stats { return g.stats }
+
+// Node returns the node for a UUID.
+func (g *Graph) Node(uuid string) (*Node, bool) {
+	n, ok := g.nodes[uuid]
+	return n, ok
+}
+
+// Galaxies lists the galaxies present in the checkout, sorted by type.
+// Galaxies with no entries are omitted: the corpus keeps a handful of
+// deprecated MITRE cluster files whose values array is empty, and listing them
+// as available is misleading.
+func (g *Graph) Galaxies() []GalaxyInfo {
+	out := make([]GalaxyInfo, 0, len(g.galaxies))
+	for _, info := range g.galaxies {
+		if info.Nodes == 0 {
+			continue
+		}
+		out = append(out, info)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Type < out[j].Type })
+	return out
+}
+
+// HasGalaxy reports whether a galaxy type exists and holds entries. Used to
+// tell a typo in a scope from a galaxy that is genuinely absent.
+func (g *Graph) HasGalaxy(t string) bool {
+	for gt, info := range g.galaxies {
+		if strings.EqualFold(gt, t) && info.Nodes > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// ---- loading helpers --------------------------------------------------------
+
+func jsonFiles(dir string) ([]string, error) {
+	var out []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.EqualFold(filepath.Ext(path), ".json") {
+			out = append(out, path)
+		}
+		return nil
+	})
+	sort.Strings(out) // deterministic: decides which duplicate UUID wins
+	return out, err
+}
+
+func readCluster(path string) (*clusterFile, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("galaxy: reading %s: %w", path, err)
+	}
+	var cf clusterFile
+	if err := json.Unmarshal(raw, &cf); err != nil {
+		return nil, fmt.Errorf("galaxy: parsing %s: %w", path, err)
+	}
+	return &cf, nil
+}
+
+// loadGalaxyDefs enriches the galaxy inventory with the definitions under
+// galaxies/. Absent or unreadable definitions are not fatal: the cluster files
+// alone are enough to build the graph.
+func (g *Graph) loadGalaxyDefs(dir string) {
+	files, err := jsonFiles(dir)
+	if err != nil {
+		return
+	}
+	for _, path := range files {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var gf galaxyFile
+		if json.Unmarshal(raw, &gf) != nil || gf.Type == "" {
+			continue
+		}
+		info, ok := g.galaxies[gf.Type]
+		if !ok {
+			continue // a galaxy with no cluster in this checkout
+		}
+		info.Name, info.Namespace = gf.Name, gf.Namespace
+		if gf.Description != "" {
+			info.Description = gf.Description
+		}
+		g.galaxies[gf.Type] = info
+	}
+}
+
+func synonymsOf(meta json.RawMessage) []string {
+	if len(meta) == 0 {
+		return nil
+	}
+	var mb metaBlock
+	if json.Unmarshal(meta, &mb) != nil {
+		return nil
+	}
+	return mb.Synonyms
+}
