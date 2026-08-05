@@ -166,6 +166,7 @@ type NodeDetail struct {
 	Description string         `json:"description,omitempty"`
 	Synonyms    []string       `json:"synonyms,omitempty"`
 	Revoked     bool           `json:"revoked,omitempty"`
+	Synthetic   bool           `json:"synthetic,omitempty" jsonschema:"the corpus published this entry without a uuid; the uuid field is a locally derived key, not a MISP identifier"`
 	Dangling    bool           `json:"dangling,omitempty"`
 	Meta        map[string]any `json:"meta,omitempty"`
 	RelationsBy map[string]int `json:"relations_by_type,omitempty" jsonschema:"count of adjacent relations per type, both directions"`
@@ -187,7 +188,7 @@ func (s *Service) Node(uuid string) (NodeDetail, error) {
 	d := NodeDetail{
 		UUID: n.UUID, Value: n.Value, Galaxy: n.Galaxy,
 		Description: n.Description, Synonyms: n.Synonyms,
-		Revoked: n.Revoked, Dangling: n.Dangling,
+		Revoked: n.Revoked, Synthetic: n.Synthetic, Dangling: n.Dangling,
 		Degree:      len(n.Out) + len(n.In),
 		RelationsBy: map[string]int{},
 	}

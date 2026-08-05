@@ -22,14 +22,15 @@ const (
 // galaxies — so collapsing to one answer produces silent misattribution. The
 // caller (or the analyst) picks; this only orders the options and says why.
 type Candidate struct {
-	UUID     string   `json:"uuid"`
-	Value    string   `json:"value"`
-	Galaxy   string   `json:"galaxy"`
-	Reason   string   `json:"reason" jsonschema:"why this matched: value, synonym, value_prefix, synonym_prefix or substring"`
-	Matched  string   `json:"matched" jsonschema:"the name or synonym that actually matched"`
-	Score    int      `json:"score"`
-	Revoked  bool     `json:"revoked,omitempty" jsonschema:"the corpus marks this entry as deprecated; it is ranked below live entries but still returned"`
-	Synonyms []string `json:"synonyms,omitempty"`
+	UUID      string   `json:"uuid"`
+	Value     string   `json:"value"`
+	Galaxy    string   `json:"galaxy"`
+	Reason    string   `json:"reason" jsonschema:"why this matched: value, synonym, value_prefix, synonym_prefix or substring"`
+	Matched   string   `json:"matched" jsonschema:"the name or synonym that actually matched"`
+	Score     int      `json:"score"`
+	Revoked   bool     `json:"revoked,omitempty" jsonschema:"the corpus marks this entry as deprecated; it is ranked below live entries but still returned"`
+	Synthetic bool     `json:"synthetic,omitempty" jsonschema:"the corpus published this entry without a uuid; the uuid field is a locally derived key, not a MISP identifier, and no relation can point at it"`
+	Synonyms  []string `json:"synonyms,omitempty"`
 }
 
 // normalise folds the spelling variants that plague actor names: case, spacing
@@ -132,7 +133,7 @@ func (g *Graph) Resolve(q string, galaxies []string, limit int) []Candidate {
 		seen[n] = Candidate{
 			UUID: n.UUID, Value: n.Value, Galaxy: n.Galaxy,
 			Reason: reason, Matched: matched, Score: score,
-			Revoked: n.Revoked, Synonyms: n.Synonyms,
+			Revoked: n.Revoked, Synthetic: n.Synthetic, Synonyms: n.Synonyms,
 		}
 	}
 
