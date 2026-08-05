@@ -83,18 +83,26 @@ func main() {
 
 	// The whole point of marking: the trail survives the session.
 	if m, ok := final.(model); ok && len(m.marks) > 0 {
-		printMarks(m.marks, *markFmt)
+		printMarks(m.marks, *markFmt, stats.SourceRef)
 	}
 }
 
-func printMarks(marks []mark, format string) {
+func printMarks(marks []mark, format, sourceRef string) {
+	// The corpus commit travels with the trail. A list of UUIDs with no corpus
+	// state behind it cannot be replayed six months later, and that is exactly
+	// when someone will want to.
 	if format == "json" {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		enc.SetEscapeHTML(false)
-		_ = enc.Encode(marks)
+		_ = enc.Encode(map[string]any{
+			"corpus_commit": sourceRef,
+			"count":         len(marks),
+			"marks":         marks,
+		})
 		return
 	}
+	fmt.Printf("# misp-galaxy corpus %s\n", sourceRef)
 	for _, m := range marks {
 		fmt.Printf("%s\t%s\t%s\n", m.UUID, m.Galaxy, m.Value)
 	}

@@ -64,8 +64,9 @@ type mark struct {
 }
 
 type model struct {
-	svc   *service.Service
-	scope []string
+	svc       *service.Service
+	scope     []string
+	sourceRef string
 
 	input     textinput.Model
 	searching bool
@@ -91,6 +92,7 @@ func newModel(svc *service.Service) model {
 	return model{
 		svc:       svc,
 		scope:     svc.Scope(),
+		sourceRef: svc.Status().Stats.SourceRef,
 		input:     ti,
 		searching: true,
 		marked:    map[string]bool{},
@@ -483,8 +485,19 @@ func (m model) View() string {
 	}
 	var b strings.Builder
 
-	b.WriteString(styTitle.Render("misp-galaxy") + "  " +
-		styDim.Render(fmt.Sprintf("%d galaxies in scope", len(m.scope))) + "\n")
+	// The corpus commit is on screen at all times, not tucked into a status
+	// view: any finding taken out of here is only reproducible against the
+	// exact corpus state it came from.
+	header := styTitle.Render("misp-galaxy") + "  " +
+		styDim.Render(fmt.Sprintf("%d galaxies in scope", len(m.scope)))
+	if m.sourceRef != "" {
+		ref := m.sourceRef
+		if len(ref) > 12 {
+			ref = ref[:12]
+		}
+		header += "  " + styDim.Render("corpus "+ref)
+	}
+	b.WriteString(header + "\n")
 
 	if len(m.stack) > 0 {
 		crumbs := make([]string, 0, len(m.stack))
