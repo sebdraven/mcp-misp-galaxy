@@ -90,8 +90,8 @@ func main() {
 		log.Fatalf("loading corpus: %v", err)
 	}
 	bar.Done("graph built")
-	log.Printf("graph built in %s: %d nodes, %d edges, %d galaxies, %d dangling, %d revoked",
-		time.Since(start).Round(time.Millisecond),
+	log.Printf("graph built in %s from corpus %s: %d nodes, %d edges, %d galaxies, %d dangling, %d revoked",
+		time.Since(start).Round(time.Millisecond), short(stats.SourceRef),
 		stats.Nodes, stats.Edges, stats.Galaxies, stats.Dangling, stats.Revoked)
 
 	// A galaxy named in the scope but absent from the checkout is almost always
