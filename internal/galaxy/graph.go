@@ -113,30 +113,40 @@ func Load(root, sourceRef string, opts ...LoadOption) (*Graph, error) {
 		}
 
 		for _, v := range cf.Values {
-			if v.UUID == "" {
-				continue // nothing to key on; the corpus has a few of these
+			if v.Value == "" {
+				continue // nothing to name it by, and nothing to search for
 			}
-			n, exists := g.nodes[v.UUID]
+			// The corpus schema only requires "value": roughly 400 entries carry
+			// no uuid. Skipping them dropped them from the search index too,
+			// since the index is built from the node map — a silent data loss.
+			// They get a synthetic key instead: searchable, but unreachable by
+			// any relation, since nothing can declare a dest-uuid for them.
+			key, synthetic := v.UUID, false
+			if key == "" {
+				key, synthetic = syntheticKey(gtype, v.Value), true
+			}
+			n, exists := g.nodes[key]
 			if exists && !n.Dangling {
-				// Same UUID defined twice. Keep the first and move on rather
+				// Same key defined twice. Keep the first and move on rather
 				// than silently overwriting one definition with another.
 				continue
 			}
 			if !exists {
-				n = &Node{UUID: v.UUID}
-				g.nodes[v.UUID] = n
+				n = &Node{UUID: key}
+				g.nodes[key] = n
 			}
 			n.Value = v.Value
 			n.Galaxy = gtype
 			n.Description = v.Description
 			n.Meta = v.Meta
 			n.Revoked = v.Revoked
+			n.Synthetic = synthetic
 			n.Synonyms = synonymsOf(v.Meta)
 			n.Dangling = false
 
 			g.byGalaxy[gtype] = append(g.byGalaxy[gtype], n)
 			if len(v.Related) > 0 {
-				deferred = append(deferred, pending{from: v.UUID, rel: v.Related})
+				deferred = append(deferred, pending{from: key, rel: v.Related})
 			}
 		}
 	}
@@ -172,13 +182,16 @@ func Load(root, sourceRef string, opts ...LoadOption) (*Graph, error) {
 	report("index", len(g.nodes), len(g.nodes))
 	g.loadGalaxyDefs(filepath.Join(root, "galaxies"))
 
-	dangling, revoked := 0, 0
+	dangling, revoked, synthetic := 0, 0, 0
 	for _, n := range g.nodes {
 		if n.Dangling {
 			dangling++
 		}
 		if n.Revoked {
 			revoked++
+		}
+		if n.Synthetic {
+			synthetic++
 		}
 	}
 	for gt, ns := range g.byGalaxy {
@@ -192,6 +205,7 @@ func Load(root, sourceRef string, opts ...LoadOption) (*Graph, error) {
 		Edges:       edges,
 		Dangling:    dangling,
 		Revoked:     revoked,
+		Synthetic:   synthetic,
 		Galaxies:    len(g.galaxies),
 		IndexedKeys: len(g.index),
 		SourceRef:   sourceRef,
@@ -234,6 +248,15 @@ func (g *Graph) HasGalaxy(t string) bool {
 		}
 	}
 	return false
+}
+
+// syntheticKeyPrefix marks an identifier this loader invented rather than read
+// from the corpus. The separator cannot occur in a UUID, so a synthetic key can
+// never collide with a real one or be hit by a dest-uuid lookup.
+const syntheticKeyPrefix = "synthetic::"
+
+func syntheticKey(galaxyType, value string) string {
+	return syntheticKeyPrefix + galaxyType + "::" + value
 }
 
 // ---- loading helpers --------------------------------------------------------

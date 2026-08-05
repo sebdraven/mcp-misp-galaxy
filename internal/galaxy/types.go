@@ -89,6 +89,12 @@ type Node struct {
 	// nothing would be worse than finding it flagged.
 	Revoked bool
 
+	// Synthetic marks an entry the corpus published without a uuid. Its UUID
+	// field then holds a key this loader derived from galaxy and value, stable
+	// across loads of the same checkout but meaningless outside this process —
+	// so it must never be reported as a corpus identifier.
+	Synthetic bool
+
 	Out []Edge
 	In  []Edge
 }
@@ -114,6 +120,7 @@ type Stats struct {
 	Edges       int    `json:"edges"`
 	Dangling    int    `json:"dangling" jsonschema:"nodes referenced by an edge but never defined as a cluster value"`
 	Revoked     int    `json:"revoked" jsonschema:"nodes the corpus marks as deprecated"`
+	Synthetic   int    `json:"synthetic" jsonschema:"entries the corpus published without a uuid; searchable but never the target of a relation"`
 	Galaxies    int    `json:"galaxies"`
 	IndexedKeys int    `json:"indexed_keys" jsonschema:"distinct normalised names and synonyms in the resolver index"`
 	SourceRef   string `json:"source_ref,omitempty" jsonschema:"commit of the misp-galaxy checkout the graph was built from"`
