@@ -28,6 +28,9 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"Matches canonical names AND vendor synonyms, so any naming convention works as input. " +
 			"Returns RANKED CANDIDATES, not a single answer: the same synonym often designates several clusters. " +
 			"When 'ambiguous' is true, check the candidates before acting on the first one. " +
+			"Each candidate carries a 'degree': relations in this corpus are concentrated in the MITRE galaxies, so a well-known malware " +
+			"often resolves to several entries of which only one has any relations at all. To then call gx_neighbors or gx_path, pick the " +
+			"candidate with a non-zero degree, not the highest-scoring one. " +
 			"Searches a threat-intelligence subset of the corpus by default \u2014 misp-galaxy also carries unrelated taxonomies " +
 			"(firearms, culture collections, economic activity codes) that would otherwise pollute results. " +
 			"The 'scope' field of the answer says what was actually searched. " +
@@ -42,9 +45,10 @@ func Register(s *mcp.Server, svc *service.Service) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "gx_neighbors",
 		Description: "Walk the relation graph outward from an entry. Relations cross galaxies, so this is how you go from a malware family to the actors using it, and from an actor to the reports documenting it. " +
+			"IMPORTANT: relations in this corpus live almost entirely in the MITRE galaxies (mitre-malware, mitre-intrusion-set, mitre-attack-pattern). " +
+			"The malpedia, threat-actor and tool galaxies are largely relation-free, so starting from one of those usually returns nothing \u2014 check the 'degree' from gx_resolve first. " +
 			"Traverses both directions by default, which is deliberate: relations are usually declared on one side only. " +
-			"Unlike gx_resolve this is NOT limited to the server's CTI scope \u2014 a declared relation is meaningful whatever galaxy it lands in \u2014 so use 'galaxies' to narrow, " +
-			"e.g. ['references'] for the reports on an actor, or ['malpedia','mitre-malware'] for its tooling.",
+			"Unlike gx_resolve this is NOT limited to the server's CTI scope \u2014 a declared relation is meaningful whatever galaxy it lands in \u2014 so use 'galaxies' to narrow.",
 	}, r.neighbours)
 
 	mcp.AddTool(s, &mcp.Tool{
