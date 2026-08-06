@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/sebdraven/mcp-misp-galaxy/internal/corpus"
@@ -295,13 +297,34 @@ func (s *Service) Status() StatusResult {
 // live graph is only replaced once the new one is fully built, so a failed
 // reload leaves the running service untouched.
 func (s *Service) Reload(opts ...galaxy.LoadOption) (galaxy.Stats, error) {
-	ref, _ := s.mgr.Head()
+	ref, err := s.mgr.Head()
+	if err != nil || ref == "" {
+		// No repository behind the corpus (a container image, typically).
+		// Provenance then has to be supplied at build time, or a result
+		// cannot be traced back to a corpus state at all.
+		ref = corpusRefFromBuild(s.root)
+	}
 	g, err := galaxy.Load(s.root, ref, opts...)
 	if err != nil {
 		return galaxy.Stats{}, err
 	}
 	s.holder.Set(g)
 	return g.Stats(), nil
+}
+
+// corpusRefFromBuild recovers the corpus commit when no git repository backs
+// the data. The image build writes it next to the corpus; the environment
+// variable overrides it, which is what a mounted volume needs since the file
+// would then describe the wrong data.
+func corpusRefFromBuild(root string) string {
+	if v := strings.TrimSpace(os.Getenv("GALAXY_CORPUS_REF")); v != "" {
+		return v
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "data", "CORPUS_REF"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
 }
 
 // Sync brings the checkout back to the pinned commit, then reloads.
