@@ -1,10 +1,16 @@
 // Command mcp-misp-galaxy loads the MISP galaxy corpus into an in-memory graph
 // and serves it over MCP (stdio or streamable HTTP) or a REST API.
 //
-// The corpus is a git submodule the process manages itself: at start it brings
-// the checkout to the commit the repository pins, and never moves past it
-// unless asked. A -resolve flag runs one lookup and exits, which is the
-// cheapest way to check the graph before putting a transport in front of it.
+// Three deployment shapes, all supported:
+//
+//	repository   the corpus is a git submodule the process syncs to the
+//	             pinned commit at start, and never moves past unless asked
+//	standalone   a downloaded binary with no repository, pointed at a corpus
+//	             directory with -data and populated by the fetch subcommand
+//	container    the corpus is baked into the image, with no git at all
+//
+// A -resolve flag runs one lookup and exits, which is the cheapest way to check
+// the graph before putting a transport in front of it.
 package main
 
 import (
@@ -33,9 +39,23 @@ import (
 var version = "0.1.0"
 
 func main() {
+	// The fetch subcommand comes before flag parsing: it is a different
+	// program with different arguments, and folding it into the server's flag
+	// set would suggest the server itself might clone — which is exactly what
+	// it must not do. An MCP client waits on the initialisation response, and
+	// cloning 50,000 files under it looks like a hang.
+	if len(os.Args) > 1 && os.Args[1] == "fetch" {
+		log.SetOutput(os.Stderr)
+		if err := runFetch(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
 	var (
 		root      = flag.String("root", envOr("GALAXY_ROOT", "."), "parent repository holding the misp-galaxy submodule")
 		submodule = flag.String("submodule", envOr("GALAXY_SUBMODULE", corpus.SubmodulePath), "submodule path inside the repository")
+		dataDir   = flag.String("data", envOr("GALAXY_DATA", ""), "corpus directory holding clusters/ and galaxies/; overrides the submodule, for a standalone binary")
 		transport = flag.String("transport", envOr("GALAXY_TRANSPORT", "stdio"), "transport: stdio, http (MCP over streamable HTTP) or rest")
 		addr      = flag.String("addr", envOr("GALAXY_ADDR", ":8090"), "listen address for http and rest")
 		noSync    = flag.Bool("no-sync", false, "skip the submodule sync and load whatever is already checked out")
@@ -60,7 +80,19 @@ func main() {
 		log.Fatalf("corpus: %v", err)
 	}
 
-	if !*noSync && mgr.Available() {
+	// An explicit -data means the corpus lives outside any repository, so the
+	// submodule machinery is bypassed entirely rather than half-applied.
+	data := strings.TrimSpace(*dataDir)
+	if data != "" {
+		if data, err = filepath.Abs(data); err != nil {
+			log.Fatalf("resolving -data: %v", err)
+		}
+		if !corpus.Usable(data) {
+			log.Fatalf("no corpus at %s\nhint: mcp-misp-galaxy fetch -data %s", data, data)
+		}
+	}
+
+	if data == "" && !*noSync && mgr.Available() {
 		start := time.Now()
 		// Only warn when there is actually something to clone: on an existing
 		// checkout the sync is a no-op and the message is just noise.
@@ -73,7 +105,7 @@ func main() {
 				"hint: run `git submodule update --init %s` once, then retry with -no-sync", err, *submodule)
 		}
 		log.Printf("corpus synced in %s (commit %s)", time.Since(start).Round(time.Millisecond), short(st.Current))
-	} else if !mgr.Available() {
+	} else if data == "" && !mgr.Available() {
 		// A baked-in corpus, as in a container image. Normal, but say so:
 		// nothing here can move the data, and provenance comes from
 		// GALAXY_CORPUS_REF rather than from git.
@@ -84,6 +116,9 @@ func main() {
 	var svcOpts []service.Option
 	if s := strings.TrimSpace(*scope); s != "" {
 		svcOpts = append(svcOpts, service.WithScope(strings.Split(s, ",")))
+	}
+	if data != "" {
+		svcOpts = append(svcOpts, service.WithDataDir(data))
 	}
 	svc := service.New(holder, mgr, svcOpts...)
 
@@ -165,6 +200,47 @@ func main() {
 	default:
 		log.Fatalf("unknown transport %q (want stdio, http or rest)", *transport)
 	}
+}
+
+// runFetch clones or updates a standalone corpus checkout.
+//
+// Separate from the server on purpose, the same way Sync and Advance are kept
+// apart: whatever changes the data is always an explicit act, never a side
+// effect of starting something.
+func runFetch(args []string) error {
+	fs := flag.NewFlagSet("fetch", flag.ExitOnError)
+	dir := fs.String("data", envOr("GALAXY_DATA", corpus.DefaultDataDir()), "where to put the corpus")
+	url := fs.String("url", corpus.UpstreamURL, "corpus repository to clone")
+	ref := fs.String("ref", "", "commit to check out; empty follows the default branch")
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, "usage: mcp-misp-galaxy fetch [flags]\n\n"+
+			"Clone or update the MISP galaxy corpus, then serve it with:\n"+
+			"  mcp-misp-galaxy -data <dir>\n\n")
+		fs.PrintDefaults()
+	}
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	dest, err := filepath.Abs(*dir)
+	if err != nil {
+		return fmt.Errorf("resolving -data: %w", err)
+	}
+
+	start := time.Now()
+	fmt.Fprintf(os.Stderr, "fetching the corpus into %s\n", dest)
+	sha, err := corpus.Fetch(context.Background(), dest, *url, *ref)
+	if err != nil {
+		return err
+	}
+	if !corpus.Usable(dest) {
+		return fmt.Errorf("fetched %s but found no clusters/ under %s", short(sha), dest)
+	}
+	fmt.Fprintf(os.Stderr, "corpus at %s (%s)\n", short(sha), time.Since(start).Round(time.Millisecond))
+	// stdout carries the path alone, so it can be captured:
+	//   mcp-misp-galaxy -data "$(mcp-misp-galaxy fetch)"
+	fmt.Println(dest)
+	return nil
 }
 
 func printJSON(v any) {
