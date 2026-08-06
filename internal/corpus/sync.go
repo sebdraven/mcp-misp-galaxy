@@ -29,21 +29,37 @@ import (
 const SubmodulePath = "data/misp-galaxy"
 
 // Manager owns the parent repository and the submodule under it.
+//
+// The repository may be absent: in a container image the corpus is baked in as
+// plain files, with no .git anywhere. That is a supported deployment, not an
+// error, so the manager degrades to unavailable and the caller loads whatever
+// is on disk. Only the git operations become impossible.
 type Manager struct {
-	root string // parent repository working tree
-	name string // submodule name as declared in .gitmodules
+	root      string // parent repository working tree
+	name      string // submodule name as declared in .gitmodules
+	available bool
 }
 
-// NewManager opens the repository at root.
+// ErrNoRepo is returned by the git operations when no repository backs the
+// checkout.
+var ErrNoRepo = errors.New("corpus: no git repository at the configured root")
+
+// NewManager opens the repository at root. A missing or unreadable repository
+// is not fatal — see Available.
 func NewManager(root, submodule string) (*Manager, error) {
 	if submodule == "" {
 		submodule = SubmodulePath
 	}
-	if _, err := git.PlainOpen(root); err != nil {
-		return nil, fmt.Errorf("corpus: opening %s: %w", root, err)
+	m := &Manager{root: root, name: submodule}
+	if _, err := git.PlainOpen(root); err == nil {
+		m.available = true
 	}
-	return &Manager{root: root, name: submodule}, nil
+	return m, nil
 }
+
+// Available reports whether git operations are possible. When false, Sync,
+// Advance and Head all fail, but the corpus on disk is still loadable.
+func (m *Manager) Available() bool { return m.available }
 
 // DataDir is the absolute path of the checked-out corpus.
 func (m *Manager) DataDir() string { return filepath.Join(m.root, m.name) }
@@ -59,6 +75,11 @@ type State struct {
 
 // Status reports the submodule state without touching anything.
 func (m *Manager) Status() (State, error) {
+	if !m.available {
+		// Still worth answering: whether the data is usable matters more than
+		// whether git can describe it.
+		return State{Path: m.DataDir(), Ready: m.hasClusters()}, nil
+	}
 	sub, err := m.submodule()
 	if err != nil {
 		return State{}, err
@@ -123,8 +144,13 @@ func (m *Manager) Advance(branch string) (State, error) {
 }
 
 // Head returns the commit currently checked out in the submodule, for stamping
-// a built graph with the corpus state it came from.
+// a built graph with the corpus state it came from. Empty when no repository
+// backs the checkout — provenance then has to come from elsewhere, which is
+// what GALAXY_CORPUS_REF is for in container images.
 func (m *Manager) Head() (string, error) {
+	if !m.available {
+		return "", ErrNoRepo
+	}
 	sub, err := m.submodule()
 	if err != nil {
 		return "", err
@@ -141,6 +167,9 @@ func (m *Manager) Head() (string, error) {
 }
 
 func (m *Manager) submodule() (*git.Submodule, error) {
+	if !m.available {
+		return nil, ErrNoRepo
+	}
 	repo, err := git.PlainOpen(m.root)
 	if err != nil {
 		return nil, fmt.Errorf("corpus: opening %s: %w", m.root, err)
