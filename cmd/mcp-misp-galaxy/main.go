@@ -228,15 +228,17 @@ func runFetch(args []string) error {
 	}
 
 	start := time.Now()
-	fmt.Fprintf(os.Stderr, "fetching the corpus into %s\n", dest)
-	sha, err := corpus.Fetch(context.Background(), dest, *url, *ref)
+	fmt.Fprintf(os.Stderr, "corpus destination: %s\n", dest)
+	sha, err := corpus.Fetch(context.Background(), dest, *url, *ref, os.Stderr)
 	if err != nil {
 		return err
 	}
 	if !corpus.Usable(dest) {
 		return fmt.Errorf("fetched %s but found no clusters/ under %s", short(sha), dest)
 	}
-	fmt.Fprintf(os.Stderr, "corpus at %s (%s)\n", short(sha), time.Since(start).Round(time.Millisecond))
+	fmt.Fprintf(os.Stderr, "ready: %d cluster files at commit %s (%s)\n",
+		corpus.CountClusters(dest), short(sha), time.Since(start).Round(time.Millisecond))
+	fmt.Fprintf(os.Stderr, "serve it with: mcp-misp-galaxy -data %s\n", dest)
 	// stdout carries the path alone, so it can be captured:
 	//   mcp-misp-galaxy -data "$(mcp-misp-galaxy fetch)"
 	fmt.Println(dest)
