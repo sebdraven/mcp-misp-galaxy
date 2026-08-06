@@ -68,8 +68,16 @@ func main() {
 		resolveQ  = flag.String("resolve", "", "resolve one name, print the ranked candidates as JSON, and exit")
 		showGx    = flag.Bool("galaxies", false, "print the galaxy inventory with entry counts and exit")
 		showStats = flag.Bool("stats", false, "print load statistics and exit")
+		showVer   = flag.Bool("version", false, "print the version and exit")
 	)
 	flag.Parse()
+
+	// Before anything touches the corpus: asking the version should never need
+	// a checkout, a network, or half a second of graph building.
+	if *showVer {
+		fmt.Println(version)
+		return
+	}
 
 	// stdio carries the protocol, so every log goes to stderr regardless of
 	// transport — a stray line on stdout corrupts the stream.

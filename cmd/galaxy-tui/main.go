@@ -60,7 +60,20 @@ func main() {
 	if err != nil {
 		log.Fatalf("corpus: %v", err)
 	}
-	if !*noSync && mgr.Available() {
+
+	// An explicit -data means the corpus lives outside any repository, so the
+	// submodule machinery is bypassed entirely rather than half-applied.
+	data := strings.TrimSpace(*dataDir)
+	if data != "" {
+		if data, err = filepath.Abs(data); err != nil {
+			log.Fatalf("resolving -data: %v", err)
+		}
+		if !corpus.Usable(data) {
+			log.Fatalf("no corpus at %s\nhint: mcp-misp-galaxy fetch -data %s", data, data)
+		}
+	}
+
+	if data == "" && !*noSync && mgr.Available() {
 		if st, err := mgr.Status(); err == nil && !st.Ready {
 			fmt.Fprintln(os.Stderr, "corpus not checked out yet: cloning the full misp-galaxy history, this takes a while")
 		}
