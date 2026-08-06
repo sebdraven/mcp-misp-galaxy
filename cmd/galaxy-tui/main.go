@@ -86,6 +86,9 @@ func main() {
 	if s := strings.TrimSpace(*scope); s != "" {
 		opts = append(opts, service.WithScope(strings.Split(s, ",")))
 	}
+	if data != "" {
+		opts = append(opts, service.WithDataDir(data))
+	}
 	holder := &galaxy.Holder{}
 	svc := service.New(holder, mgr, opts...)
 
