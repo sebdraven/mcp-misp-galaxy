@@ -29,8 +29,7 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"Returns RANKED CANDIDATES, not a single answer: the same synonym often designates several clusters. " +
 			"When 'ambiguous' is true, check the candidates before acting on the first one. " +
 			"Each candidate carries a 'degree': relations in this corpus are concentrated in the MITRE galaxies, so a well-known malware " +
-			"often resolves to several entries of which only one has any relations at all. To then call gx_neighbors or gx_path, pick the " +
-			"candidate with a non-zero degree, not the highest-scoring one. " +
+			"often resolves to several entries with very different degrees. To then call gx_neighbors or gx_path, pick the candidate with the highest degree, not the highest score. " +
 			"Searches a threat-intelligence subset of the corpus by default \u2014 misp-galaxy also carries unrelated taxonomies " +
 			"(firearms, culture collections, economic activity codes) that would otherwise pollute results. " +
 			"The 'scope' field of the answer says what was actually searched. " +
@@ -46,14 +45,14 @@ func Register(s *mcp.Server, svc *service.Service) {
 		Name: "gx_neighbors",
 		Description: "Walk the relation graph outward from an entry. Relations cross galaxies, so this is how you go from a malware family to the actors using it, and from an actor to the reports documenting it. " +
 			"IMPORTANT: relations in this corpus live almost entirely in the MITRE galaxies (mitre-malware, mitre-intrusion-set, mitre-attack-pattern). " +
-			"The malpedia, threat-actor and tool galaxies are largely relation-free, so starting from one of those usually returns nothing \u2014 check the 'degree' from gx_resolve first. " +
+			"The malpedia, threat-actor and tool galaxies carry far fewer, so always start from the candidate gx_resolve reported with the highest degree. Starting from a low-degree entry for the same thing returns almost nothing. " +
 			"Traverses both directions by default, which is deliberate: relations are usually declared on one side only. " +
 			"Unlike gx_resolve this is NOT limited to the server's CTI scope \u2014 a declared relation is meaningful whatever galaxy it lands in \u2014 so use 'galaxies' to narrow.",
 	}, r.neighbours)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "gx_path",
-		Description: "Find a shortest relation path between two galaxy entries by UUID — e.g. what connects a given actor to a given malware family. Returns the chain of entries and the relation type taken at each hop.",
+		Description: "Find a shortest relation path between two galaxy entries by UUID — e.g. what connects a given actor to a given malware family. Returns the chain of entries and the relation type taken at each hop. Both endpoints need relations to be connectable, so prefer the highest-degree UUID for each end: an empty path often means one endpoint has a degree of 0, not that the two are unrelated in reality.",
 	}, r.path)
 
 	mcp.AddTool(s, &mcp.Tool{
