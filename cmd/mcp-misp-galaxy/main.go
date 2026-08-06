@@ -60,7 +60,7 @@ func main() {
 		log.Fatalf("corpus: %v", err)
 	}
 
-	if !*noSync {
+	if !*noSync && mgr.Available() {
 		start := time.Now()
 		// Only warn when there is actually something to clone: on an existing
 		// checkout the sync is a no-op and the message is just noise.
@@ -73,6 +73,11 @@ func main() {
 				"hint: run `git submodule update --init %s` once, then retry with -no-sync", err, *submodule)
 		}
 		log.Printf("corpus synced in %s (commit %s)", time.Since(start).Round(time.Millisecond), short(st.Current))
+	} else if !mgr.Available() {
+		// A baked-in corpus, as in a container image. Normal, but say so:
+		// nothing here can move the data, and provenance comes from
+		// GALAXY_CORPUS_REF rather than from git.
+		log.Print("no git repository at root: using the corpus as it sits on disk")
 	}
 
 	holder := &galaxy.Holder{}

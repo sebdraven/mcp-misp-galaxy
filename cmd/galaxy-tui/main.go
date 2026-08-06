@@ -49,7 +49,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("corpus: %v", err)
 	}
-	if !*noSync {
+	if !*noSync && mgr.Available() {
 		if st, err := mgr.Status(); err == nil && !st.Ready {
 			fmt.Fprintln(os.Stderr, "corpus not checked out yet: cloning the full misp-galaxy history, this takes a while")
 		}
