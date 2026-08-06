@@ -1,0 +1,62 @@
+version: 2
+
+# Pinning actions to a commit hash stops a tag from being moved under us, but it
+# also freezes them: a pinned action never receives its own security fixes
+# unless something bumps the hash. That something is this file — without it,
+# pinning trades one supply-chain risk for another.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Europe/Paris
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+    labels:
+      - dependencies
+      - github-actions
+    groups:
+      # One PR for the whole set rather than five. Action bumps are almost
+      # always mechanical, and reviewing them together is what makes them get
+      # reviewed at all.
+      actions:
+        patterns: ['*']
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Europe/Paris
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+    labels:
+      - dependencies
+      - go
+    groups:
+      # Patch and minor bumps together; majors stay separate because they can
+      # break the build and deserve their own review.
+      go-minor:
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Europe/Paris
+    commit-message:
+      prefix: docker
+    labels:
+      - dependencies
+      - docker
+    # Only the base images here. The corpus is not a Docker dependency and is
+    # refreshed by corpus-watch.yml, which tracks the upstream repository
+    # directly.
