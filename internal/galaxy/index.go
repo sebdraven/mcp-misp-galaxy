@@ -28,6 +28,7 @@ type Candidate struct {
 	Reason    string   `json:"reason" jsonschema:"why this matched: value, synonym, value_prefix, synonym_prefix or substring"`
 	Matched   string   `json:"matched" jsonschema:"the name or synonym that actually matched"`
 	Score     int      `json:"score"`
+	Degree    int      `json:"degree" jsonschema:"number of relations on this entry. 0 means it cannot be traversed: gx_neighbors and gx_path will return nothing from it. When several candidates name the same thing, prefer the one with a non-zero degree"`
 	Revoked   bool     `json:"revoked,omitempty" jsonschema:"the corpus marks this entry as deprecated; it is ranked below live entries but still returned"`
 	Synthetic bool     `json:"synthetic,omitempty" jsonschema:"the corpus published this entry without a uuid; the uuid field is a locally derived key, not a MISP identifier, and no relation can point at it"`
 	Synonyms  []string `json:"synonyms,omitempty"`
@@ -133,6 +134,12 @@ func (g *Graph) Resolve(q string, galaxies []string, limit int) []Candidate {
 		seen[n] = Candidate{
 			UUID: n.UUID, Value: n.Value, Galaxy: n.Galaxy,
 			Reason: reason, Matched: matched, Score: score,
+			// Degree is what tells a caller which candidate is usable for
+			// traversal. The relations in this corpus sit almost entirely in
+			// the MITRE galaxies: the same malware can resolve to three
+			// entries, of which only one has any edges at all, and nothing
+			// else in the result says which.
+			Degree:  len(n.Out) + len(n.In),
 			Revoked: n.Revoked, Synthetic: n.Synthetic, Synonyms: n.Synonyms,
 		}
 	}
