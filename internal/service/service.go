@@ -85,6 +85,18 @@ func WithScope(galaxies []string) Option {
 	return func(s *Service) { s.scope = normaliseScope(galaxies) }
 }
 
+// WithDataDir overrides where the corpus is read from. Without it the corpus
+// is the submodule under the repository; with it, any directory holding
+// clusters/ and galaxies/ will do — which is what a standalone binary needs,
+// having no repository to sit in.
+func WithDataDir(dir string) Option {
+	return func(s *Service) {
+		if dir != "" {
+			s.root = dir
+		}
+	}
+}
+
 // New wires a service over a holder and the corpus manager backing reloads.
 func New(h *galaxy.Holder, mgr *corpus.Manager, opts ...Option) *Service {
 	s := &Service{holder: h, mgr: mgr, root: mgr.DataDir(), scope: DefaultScope}
@@ -297,14 +309,7 @@ func (s *Service) Status() StatusResult {
 // live graph is only replaced once the new one is fully built, so a failed
 // reload leaves the running service untouched.
 func (s *Service) Reload(opts ...galaxy.LoadOption) (galaxy.Stats, error) {
-	ref, err := s.mgr.Head()
-	if err != nil || ref == "" {
-		// No repository behind the corpus (a container image, typically).
-		// Provenance then has to be supplied at build time, or a result
-		// cannot be traced back to a corpus state at all.
-		ref = corpusRefFromBuild(s.root)
-	}
-	g, err := galaxy.Load(s.root, ref, opts...)
+	g, err := galaxy.Load(s.root, s.corpusRef(), opts...)
 	if err != nil {
 		return galaxy.Stats{}, err
 	}
@@ -312,15 +317,31 @@ func (s *Service) Reload(opts ...galaxy.LoadOption) (galaxy.Stats, error) {
 	return g.Stats(), nil
 }
 
+// corpusRef establishes where the data came from, trying each deployment shape
+// in turn. A result with no corpus reference cannot be replayed later, so this
+// is worth more than one lookup.
+func (s *Service) corpusRef() string {
+	// Vendored as a submodule under a repository.
+	if ref, err := s.mgr.Head(); err == nil && ref != "" {
+		return ref
+	}
+	// Fetched standalone: the corpus directory is itself a clone.
+	if ref := corpus.HeadOf(s.root); ref != "" {
+		return ref
+	}
+	// Baked into a container image, where there is no git at all.
+	return corpusRefFromBuild(s.root)
+}
+
 // corpusRefFromBuild recovers the corpus commit when no git repository backs
-// the data. The image build writes it next to the corpus; the environment
-// variable overrides it, which is what a mounted volume needs since the file
-// would then describe the wrong data.
-func corpusRefFromBuild(root string) string {
+// the data. The image build writes the file inside the corpus directory; the
+// environment variable overrides it, which is what a mounted volume needs
+// since the file would then describe the wrong data.
+func corpusRefFromBuild(dataDir string) string {
 	if v := strings.TrimSpace(os.Getenv("GALAXY_CORPUS_REF")); v != "" {
 		return v
 	}
-	raw, err := os.ReadFile(filepath.Join(root, "data", "CORPUS_REF"))
+	raw, err := os.ReadFile(filepath.Join(dataDir, "CORPUS_REF"))
 	if err != nil {
 		return ""
 	}
