@@ -1,0 +1,137 @@
+name: release
+
+# Tags only. A registry push is a publication, and publications should be named
+# and deliberate rather than a side effect of merging to main.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # Cosign keyless signing exchanges this token for a certificate, so the
+      # signature is bound to this workflow rather than to a key someone holds.
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: record the corpus commit
+        id: corpus
+        run: echo "ref=$(git -C data/misp-galaxy rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        id: push
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: CORPUS_REF=${{ steps.corpus.outputs.ref }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+
+      - name: sign the image
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          # Sign by digest, never by tag: a tag can be moved after signing.
+          for tag in $TAGS; do
+            cosign sign --yes "${tag%%:*}@${DIGEST}"
+          done
+
+  binaries:
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          submodules: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.25'
+          # No cache in a publishing workflow. A cache entry poisoned by an
+          # earlier run on a branch would end up baked into a signed release
+          # artefact, and the few seconds saved are not worth that.
+          cache: false
+
+      - name: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          suffix="${GOOS}-${GOARCH}"
+          go build -trimpath -ldflags="-s -w" -o "mcp-misp-galaxy-${suffix}" ./cmd/mcp-misp-galaxy
+          go build -trimpath -ldflags="-s -w" -o "galaxy-tui-${suffix}" ./cmd/galaxy-tui
+          shasum -a 256 "mcp-misp-galaxy-${suffix}" "galaxy-tui-${suffix}" > "checksums-${suffix}.txt"
+
+      - name: publish the artefacts
+        # gh is preinstalled on every runner, so a third-party action here would
+        # add a supply-chain dependency for something the runner already does.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          suffix="${GOOS}-${GOARCH}"
+          # The matrix legs race to create the release; the losers fail
+          # harmlessly and go straight to uploading.
+          gh release create "$TAG" --generate-notes --verify-tag || true
+          gh release upload "$TAG" --clobber \
+            "mcp-misp-galaxy-${suffix}" \
+            "galaxy-tui-${suffix}" \
+            "checksums-${suffix}.txt"

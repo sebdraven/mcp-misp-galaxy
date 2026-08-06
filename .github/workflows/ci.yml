@@ -1,0 +1,118 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege by default; jobs that need more ask for it explicitly.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          # The unit tests build their own fixtures, so the corpus is not
+          # needed here. Skipping it keeps this job fast; the build job pulls
+          # it because the image bakes it in.
+          submodules: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l ./cmd ./internal)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt'd:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - run: go vet ./...
+
+      - run: go test -race -coverprofile=coverage.out ./...
+
+      - name: coverage summary
+        run: go tool cover -func=coverage.out | tail -n 1 >> "$GITHUB_STEP_SUMMARY"
+
+  staticcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          submodules: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.25'
+          cache: true
+      - uses: dominikh/staticcheck-action@9716614d4101e79b4340dd97b10e54d68234e431 # v1
+        with:
+          version: latest
+          install-go: false
+
+  zizmor:
+    # Static analysis of these very workflows. A CI pipeline is an execution
+    # environment with access to secrets and a package registry, so it deserves
+    # the same scrutiny as the code it builds.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          submodules: false
+      - uses: zizmorcore/zizmor-action@{"message":"No commit found for SHA: v0","documentation_url":"https://docs.github.com/rest/commits/commits#get-a-commit","status":"422"} # v0
+        with:
+          # SARIF upload needs GitHub Advanced Security; without it the job
+          # would fail on the upload rather than on real findings. Findings are
+          # printed in the log and fail the job on their own.
+          advanced-security: false
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          # The image bakes the corpus in, so the submodule is required.
+          submodules: recursive
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: build binaries
+        run: |
+          go build -trimpath -o bin/mcp-misp-galaxy ./cmd/mcp-misp-galaxy
+          go build -trimpath -o bin/galaxy-tui ./cmd/galaxy-tui
+
+      - name: load the real corpus
+        # The unit tests use synthetic fixtures, so nothing else here would
+        # catch a corpus that fails to parse after an upstream schema change.
+        run: ./bin/mcp-misp-galaxy -root . -no-sync -stats
+
+      - name: docker build
+        run: |
+          docker build \
+            --build-arg CORPUS_REF="$(git -C data/misp-galaxy rev-parse HEAD)" \
+            -t mcp-misp-galaxy:ci .
+
+      - name: smoke test the image
+        # Checks the container path specifically: no git repository, corpus
+        # cloned at build time, provenance read from the file the build wrote.
+        run: docker run --rm mcp-misp-galaxy:ci -no-sync -stats

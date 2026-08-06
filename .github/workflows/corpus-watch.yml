@@ -1,0 +1,137 @@
+name: corpus-watch
+
+# GitHub cannot notify us of pushes to a repository we do not own, so this
+# polls instead. The point is not to rebuild on a schedule but to rebuild when
+# the corpus actually moves: each image is tagged with the corpus commit it was
+# built from, so an unchanged upstream means the tag already exists and the job
+# stops before doing any work.
+on:
+  schedule:
+    # 05:17 UTC. Off the hour on purpose — the top of the hour is when every
+    # scheduled workflow on GitHub queues at once, and delays run by tens of
+    # minutes.
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Rebuild even if this corpus commit is already published'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: corpus-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      sha: ${{ steps.upstream.outputs.sha }}
+      tag: ${{ steps.upstream.outputs.tag }}
+      needed: ${{ steps.published.outputs.needed }}
+    steps:
+      - name: read the upstream corpus HEAD
+        id: upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha=$(gh api repos/MISP/misp-galaxy/commits/main --jq '.sha')
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "tag=corpus-${sha:0:12}" >> "$GITHUB_OUTPUT"
+          echo "upstream corpus is at ${sha}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: log in to ghcr
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: is this corpus already published?
+        id: published
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}
+          TAG: ${{ steps.upstream.outputs.tag }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          if [ "${FORCE}" = "true" ]; then
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+            echo "forced rebuild" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # The registry is the state store: no variable to keep in sync, and
+          # nothing to go stale if a run is cancelled halfway.
+          if docker manifest inspect "${IMAGE}:${TAG}" >/dev/null 2>&1; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            echo "already published as ${TAG}, nothing to do" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+            echo "new corpus, building ${TAG}" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  build:
+    needs: check
+    if: needs.check.outputs.needed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          # The corpus is cloned inside the image build, so the submodule is
+          # not needed in the context.
+          submodules: false
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        id: push
+        with:
+          context: .
+          push: true
+          # Never 'latest' here. That tag belongs to tagged releases, where a
+          # human decided to publish; a corpus refresh is not a release of this
+          # software. 'corpus-latest' gives you a moving target if you want one.
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ needs.check.outputs.tag }}
+            ghcr.io/${{ github.repository }}:corpus-latest
+          build-args: CORPUS_REF=${{ needs.check.outputs.sha }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+
+      - name: sign the image
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: smoke test what was published
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}
+          TAG: ${{ needs.check.outputs.tag }}
+        run: |
+          # Pull back the published image rather than testing a local one: this
+          # runs unattended, so the only thing worth checking is what users get.
+          docker run --rm "${IMAGE}:${TAG}" -no-sync -stats
