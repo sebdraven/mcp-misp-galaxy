@@ -99,7 +99,7 @@ func main() {
 	bar.Done(fmt.Sprintf("loaded %d entries, %d relations in %s",
 		stats.Nodes, stats.Edges, time.Since(start).Round(time.Millisecond)))
 
-	p := tea.NewProgram(newModel(svc), tea.WithAltScreen())
+	p := tea.NewProgram(newModel(svc, version), tea.WithAltScreen())
 	final, err := p.Run()
 	if err != nil {
 		log.Fatal(err)

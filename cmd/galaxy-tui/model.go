@@ -67,6 +67,7 @@ type model struct {
 	svc       *service.Service
 	scope     []string
 	sourceRef string
+	version   string
 
 	input     textinput.Model
 	searching bool
@@ -82,7 +83,7 @@ type model struct {
 	quitting      bool
 }
 
-func newModel(svc *service.Service) model {
+func newModel(svc *service.Service, version string) model {
 	ti := textinput.New()
 	ti.Placeholder = "actor, malware or technique name"
 	ti.Prompt = "search: "
@@ -93,6 +94,7 @@ func newModel(svc *service.Service) model {
 		svc:       svc,
 		scope:     svc.Scope(),
 		sourceRef: svc.Status().Stats.SourceRef,
+		version:   version,
 		input:     ti,
 		searching: true,
 		marked:    map[string]bool{},
@@ -488,8 +490,11 @@ func (m model) View() string {
 	// The corpus commit is on screen at all times, not tucked into a status
 	// view: any finding taken out of here is only reproducible against the
 	// exact corpus state it came from.
-	header := styTitle.Render("misp-galaxy") + "  " +
-		styDim.Render(fmt.Sprintf("%d galaxies in scope", len(m.scope)))
+	header := styTitle.Render("misp-galaxy")
+	if m.version != "" {
+		header += " " + styDim.Render(m.version)
+	}
+	header += "  " + styDim.Render(fmt.Sprintf("%d galaxies in scope", len(m.scope)))
 	if m.sourceRef != "" {
 		ref := m.sourceRef
 		if len(ref) > 12 {
