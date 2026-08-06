@@ -58,8 +58,10 @@ WORKDIR /app
 COPY --from=build /out/mcp-misp-galaxy /app/mcp-misp-galaxy
 COPY --from=corpus /corpus/out /app/data/misp-galaxy
 # There is no .git in the image, so this file is the only provenance a result
-# can carry. The server reads it when git is unavailable.
-COPY --from=corpus /corpus/REF /app/data/CORPUS_REF
+# can carry. It sits inside the corpus directory, which is what the server
+# reads — and what a mounted volume would replace, hence GALAXY_CORPUS_REF as
+# an override.
+COPY --from=corpus /corpus/REF /app/data/misp-galaxy/CORPUS_REF
 
 ENV GALAXY_ROOT=/app \
     GALAXY_TRANSPORT=http \
