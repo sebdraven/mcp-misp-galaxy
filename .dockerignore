@@ -1,0 +1,9 @@
+# The corpus is cloned inside the image build, not copied from here.
+data/
+bin/
+.git
+.github
+*.md
+!README.md
+Dockerfile
+.dockerignore
