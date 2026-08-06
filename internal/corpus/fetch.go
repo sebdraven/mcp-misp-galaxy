@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
@@ -24,9 +26,12 @@ const UpstreamURL = "https://github.com/MISP/misp-galaxy.git"
 // hang, and an MCP client is waiting on the initialisation response while it
 // happens.
 //
+// progress, when non-nil, receives git's own sideband output. Without it the
+// command sits silent for as long as the clone takes, which reads as a freeze.
+//
 // Cloning is shallow: the corpus is used as data, and its history is large and
 // of no interest here.
-func Fetch(ctx context.Context, dir, url, ref string) (string, error) {
+func Fetch(ctx context.Context, dir, url, ref string, progress io.Writer) (string, error) {
 	if url == "" {
 		url = UpstreamURL
 	}
@@ -41,17 +46,24 @@ func Fetch(ctx context.Context, dir, url, ref string) (string, error) {
 	switch {
 	case err == nil:
 		// Already there: update in place rather than re-cloning.
-		if err := update(ctx, repo, ref); err != nil {
+		note(progress, "updating the existing checkout\n")
+		if err := update(ctx, repo, ref, progress); err != nil {
 			return "", err
 		}
 	case errors.Is(err, git.ErrRepositoryNotExists):
-		opts := &git.CloneOptions{URL: url, Depth: 1, SingleBranch: true}
+		note(progress, "cloning %s (shallow)\n", url)
+		opts := &git.CloneOptions{
+			URL:          url,
+			Depth:        1,
+			SingleBranch: true,
+			Progress:     progress,
+		}
 		repo, err = git.PlainCloneContext(ctx, dir, false, opts)
 		if err != nil {
 			return "", fmt.Errorf("corpus: cloning %s: %w", url, err)
 		}
 		if ref != "" {
-			if err := update(ctx, repo, ref); err != nil {
+			if err := update(ctx, repo, ref, progress); err != nil {
 				return "", err
 			}
 		}
@@ -66,28 +78,56 @@ func Fetch(ctx context.Context, dir, url, ref string) (string, error) {
 	return head.Hash().String(), nil
 }
 
+func note(w io.Writer, format string, args ...any) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintf(w, format, args...)
+}
+
+// CountClusters reports how many cluster files a corpus directory holds, for a
+// closing line that says something happened.
+func CountClusters(dir string) int {
+	entries, err := os.ReadDir(filepath.Join(dir, "clusters"))
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() && strings.EqualFold(filepath.Ext(e.Name()), ".json") {
+			n++
+		}
+	}
+	return n
+}
+
 // update moves an existing checkout: to ref when given, otherwise to the tip of
 // the tracked branch.
-func update(ctx context.Context, repo *git.Repository, ref string) error {
+func update(ctx context.Context, repo *git.Repository, ref string, progress io.Writer) error {
 	wt, err := repo.Worktree()
 	if err != nil {
 		return fmt.Errorf("corpus: worktree: %w", err)
 	}
 
 	if ref == "" {
-		err = wt.PullContext(ctx, &git.PullOptions{RemoteName: "origin", Depth: 1})
+		err = wt.PullContext(ctx, &git.PullOptions{RemoteName: "origin", Depth: 1, Progress: progress})
 		if err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
 			return fmt.Errorf("corpus: pulling: %w", err)
+		}
+		if errors.Is(err, git.NoErrAlreadyUpToDate) {
+			note(progress, "already up to date\n")
 		}
 		return nil
 	}
 
 	// A specific commit may not be in a shallow clone, so fetch it explicitly
 	// before checking it out.
+	note(progress, "fetching %s\n", ref)
 	fetchErr := repo.FetchContext(ctx, &git.FetchOptions{
 		RemoteName: "origin",
 		Depth:      1,
 		RefSpecs:   []config.RefSpec{config.RefSpec(ref + ":refs/corpus/pinned")},
+		Progress:   progress,
 	})
 	if fetchErr != nil && !errors.Is(fetchErr, git.NoErrAlreadyUpToDate) {
 		// Not fatal: the commit may already be present locally.
