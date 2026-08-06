@@ -27,15 +27,26 @@ import (
 	"github.com/sebdraven/mcp-misp-galaxy/internal/ui"
 )
 
+// version is injected at build time with -ldflags "-X main.version=...",
+// matching the server binary so a release stamps both the same way.
+var version = "dev"
+
 func main() {
 	var (
 		root      = flag.String("root", envOr("GALAXY_ROOT", "."), "parent repository holding the misp-galaxy submodule")
 		submodule = flag.String("submodule", envOr("GALAXY_SUBMODULE", corpus.SubmodulePath), "submodule path inside the repository")
+		dataDir   = flag.String("data", envOr("GALAXY_DATA", ""), "corpus directory holding clusters/ and galaxies/; overrides the submodule")
 		scope     = flag.String("scope", envOr("GALAXY_SCOPE", ""), "comma-separated galaxies to search; empty uses the built-in CTI scope, \"all\" searches the whole corpus")
 		noSync    = flag.Bool("no-sync", false, "skip the submodule sync and load whatever is already checked out")
 		markFmt   = flag.String("marks", "text", "how to print marked entries on exit: text or json")
+		showVer   = flag.Bool("version", false, "print the version and exit")
 	)
 	flag.Parse()
+
+	if *showVer {
+		fmt.Println(version)
+		return
+	}
 
 	// The UI owns stdout once it starts; keep the loading chatter on stderr so
 	// piping the marked trail to a file stays clean.

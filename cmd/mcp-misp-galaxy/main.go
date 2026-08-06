@@ -36,7 +36,11 @@ import (
 	"github.com/sebdraven/mcp-misp-galaxy/internal/ui"
 )
 
-var version = "0.1.0"
+// version is injected at build time with -ldflags "-X main.version=...".
+// The default is deliberately "dev" rather than a number: a locally built
+// binary that announces a release version lies to whoever reads it, and the
+// MCP client shows this string as the server's identity.
+var version = "dev"
 
 func main() {
 	// The fetch subcommand comes before flag parsing: it is a different

@@ -12,6 +12,11 @@ FROM golang:1.26-alpine AS build
 
 WORKDIR /src
 
+# Stamped into the binary so a running container reports the version it was
+# built from. Defaults to "container" rather than a number: an image built
+# outside the release workflow should not claim a release.
+ARG VERSION=container
+
 # Dependencies first, so a source-only change does not refetch the module graph.
 COPY go.mod go.sum ./
 RUN go mod download
@@ -20,7 +25,7 @@ COPY cmd ./cmd
 COPY internal ./internal
 
 # CGO off and a stripped binary: the runtime stage has no libc to link against.
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
         -o /out/mcp-misp-galaxy ./cmd/mcp-misp-galaxy
 
 # Corpus stage, separate so a source change does not re-clone 50k files.
