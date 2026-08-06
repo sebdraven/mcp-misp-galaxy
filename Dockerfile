@@ -8,7 +8,7 @@
 # It is deliberately NOT cloned at container start: that would need network and
 # git at runtime, would break when GitHub is unreachable, and would let two runs
 # of the same image answer differently. A given tag answers from a given corpus.
-FROM golang:1.25-alpine AS build
+FROM golang:1.26-alpine AS build
 
 WORKDIR /src
 
