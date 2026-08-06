@@ -158,7 +158,9 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}:edge
             ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
-          build-args: CORPUS_REF=${{ steps.corpus.outputs.ref }}
+          build-args: |
+            CORPUS_REF=${{ steps.corpus.outputs.ref }}
+            VERSION=edge-${{ github.sha }}
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max

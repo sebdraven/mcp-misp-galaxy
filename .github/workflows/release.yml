@@ -56,7 +56,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: CORPUS_REF=${{ steps.corpus.outputs.ref }}
+          build-args: |
+            CORPUS_REF=${{ steps.corpus.outputs.ref }}
+            VERSION=${{ github.ref_name }}
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -110,11 +112,15 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '0'
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           suffix="${GOOS}-${GOARCH}"
-          go build -trimpath -ldflags="-s -w" -o "mcp-misp-galaxy-${suffix}" ./cmd/mcp-misp-galaxy
-          go build -trimpath -ldflags="-s -w" -o "galaxy-tui-${suffix}" ./cmd/galaxy-tui
+          # The tag is stamped into the binary, so a released artefact reports
+          # the version it was cut from rather than a number left in the source.
+          ldflags="-s -w -X main.version=${TAG}"
+          go build -trimpath -ldflags="$ldflags" -o "mcp-misp-galaxy-${suffix}" ./cmd/mcp-misp-galaxy
+          go build -trimpath -ldflags="$ldflags" -o "galaxy-tui-${suffix}" ./cmd/galaxy-tui
           shasum -a 256 "mcp-misp-galaxy-${suffix}" "galaxy-tui-${suffix}" > "checksums-${suffix}.txt"
 
       - name: publish the artefacts
