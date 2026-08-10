@@ -537,6 +537,88 @@ func TestDirectionReflectsWhatTheCorpusDeclared(t *testing.T) {
 	}
 }
 
+// ---- specificity ------------------------------------------------------------
+
+// actorGraph links one technique to three actors and another to one, which is
+// the shape the specificity signal exists to tell apart.
+func actorGraph(t *testing.T) *Graph {
+	t.Helper()
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters, "threat-actor", []map[string]any{
+		{"value": "Actor One", "uuid": "a-1", "related": []map[string]any{
+			{"dest-uuid": "t-common", "type": "uses"},
+			{"dest-uuid": "t-rare", "type": "uses"},
+		}},
+		{"value": "Actor Two", "uuid": "a-2", "related": []map[string]any{
+			{"dest-uuid": "t-common", "type": "uses"},
+		}},
+		{"value": "Actor Three", "uuid": "a-3", "related": []map[string]any{
+			{"dest-uuid": "t-common", "type": "uses"},
+		}},
+	})
+	writeCluster(t, clusters, "mitre-attack-pattern", []map[string]any{
+		{"value": "Everyone Does This", "uuid": "t-common"},
+		{"value": "Only One Does This", "uuid": "t-rare"},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	return g
+}
+
+func TestGroupCountMeasuresActorsNotEdges(t *testing.T) {
+	g := actorGraph(t)
+	common, _ := g.Node("t-common")
+	rare, _ := g.Node("t-rare")
+	if common.GroupCount != 3 {
+		t.Errorf("shared technique: group_count = %d, want 3", common.GroupCount)
+	}
+	if rare.GroupCount != 1 {
+		t.Errorf("exclusive technique: group_count = %d, want 1", rare.GroupCount)
+	}
+	// An actor is not counted against itself, and non-actor neighbours never
+	// count — the question is "how many actors", not "how many links".
+	actor, _ := g.Node("a-1")
+	if actor.GroupCount != 0 {
+		t.Errorf("actor linked only to techniques: group_count = %d, want 0", actor.GroupCount)
+	}
+}
+
+func TestSpecificNeighboursRankBeforeGeneric(t *testing.T) {
+	g := actorGraph(t)
+	found := g.Neighbours("a-1", NeighbourOpts{Depth: 1})
+	if len(found) != 2 {
+		t.Fatalf("expected both techniques, got %+v", found)
+	}
+	if found[0].UUID != "t-rare" {
+		t.Errorf("the exclusive technique should come first, got %+v", found)
+	}
+}
+
+func TestMaxGroupCountDropsGeneric(t *testing.T) {
+	g := actorGraph(t)
+	found := g.Neighbours("a-1", NeighbourOpts{Depth: 1, MaxGroupCount: 2})
+	if len(found) != 1 || found[0].UUID != "t-rare" {
+		t.Fatalf("the shared technique should be filtered out, got %+v", found)
+	}
+}
+
+func TestMostGenericRanksWorstFirst(t *testing.T) {
+	g := actorGraph(t)
+	top := g.MostGeneric("mitre-attack-pattern", 5)
+	if len(top) != 2 {
+		t.Fatalf("expected both techniques, got %+v", top)
+	}
+	if top[0].UUID != "t-common" {
+		t.Errorf("the most-shared technique should come first, got %+v", top)
+	}
+}
+
 // ---- traversal --------------------------------------------------------------
 
 func TestNeighboursFollowsRelationBackwards(t *testing.T) {
