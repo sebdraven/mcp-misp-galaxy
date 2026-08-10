@@ -48,7 +48,7 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"IMPORTANT: relations in this corpus live almost entirely in the MITRE galaxies (mitre-malware, mitre-intrusion-set, mitre-attack-pattern). " +
 			"The malpedia, threat-actor and tool galaxies carry far fewer, so always start from the candidate gx_resolve reported with the highest degree. Starting from a low-degree entry for the same thing returns almost nothing. " +
 			"Traverses both directions by default, which is deliberate: relations are usually declared on one side only. " +
-			"Unlike gx_resolve this is NOT limited to the server's CTI scope \u2014 a declared relation is meaningful whatever galaxy it lands in \u2014 so use 'galaxies' to narrow. Each result carries 'confidence' (declarations backing the hop) and 'bridge' (the hop is the sole join between two parts of the graph); a bridge at confidence 1 rests on one unverified claim and should be reported as provisional.",
+			"Unlike gx_resolve this is NOT limited to the server's CTI scope \u2014 a declared relation is meaningful whatever galaxy it lands in \u2014 so use 'galaxies' to narrow. Each result carries 'confidence' (declarations backing the hop) and 'bridge' (the hop is the sole join between two parts of the graph); a bridge at confidence 1 rests on one unverified claim and should be reported as provisional. Each result also carries 'group_count' — how many actors are linked to that entry. Results are ordered most-specific first, and anything flagged 'generic' is shared by so many actors that it distinguishes none of them; max_group_count strips those entirely.",
 	}, r.neighbours)
 
 	mcp.AddTool(s, &mcp.Tool{
