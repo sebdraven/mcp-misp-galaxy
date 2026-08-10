@@ -21,6 +21,7 @@ const (
 // Neighbour is one node reached from a starting point.
 type Neighbour struct {
 	UUID     string   `json:"uuid"`
+	Tag      string   `json:"tag,omitempty" jsonschema:"canonical MISP galaxy tag for this entry"`
 	Value    string   `json:"value,omitempty"`
 	Galaxy   string   `json:"galaxy,omitempty"`
 	Depth    int      `json:"depth"`
@@ -97,7 +98,7 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 				continue
 			}
 			n := Neighbour{
-				UUID: e.To.UUID, Value: e.To.Value, Galaxy: e.To.Galaxy,
+				UUID: e.To.UUID, Tag: e.To.Tag(), Value: e.To.Value, Galaxy: e.To.Galaxy,
 				Depth: cur.depth + 1, Via: e.Type,
 				FromUUID: cur.node.UUID, Dangling: e.To.Dangling,
 			}
@@ -123,6 +124,7 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 // PathHop is one step along a discovered path.
 type PathHop struct {
 	UUID   string `json:"uuid"`
+	Tag    string `json:"tag,omitempty" jsonschema:"canonical MISP galaxy tag for this entry"`
 	Value  string `json:"value,omitempty"`
 	Galaxy string `json:"galaxy,omitempty"`
 	Via    string `json:"via,omitempty" jsonschema:"relation type taken to reach this node"`
@@ -142,7 +144,7 @@ func (g *Graph) ShortestPath(fromUUID, toUUID string, maxDepth int, edgeTypes []
 		return nil
 	}
 	if from == to {
-		return []PathHop{{UUID: from.UUID, Value: from.Value, Galaxy: from.Galaxy}}
+		return []PathHop{{UUID: from.UUID, Tag: from.Tag(), Value: from.Value, Galaxy: from.Galaxy}}
 	}
 	if maxDepth <= 0 {
 		maxDepth = 6
@@ -203,7 +205,7 @@ func stitch(meet *Node, fwd, bwd map[*Node]link) []PathHop {
 	var head []PathHop
 	for n := meet; n != nil; {
 		l := fwd[n]
-		head = append(head, PathHop{UUID: n.UUID, Value: n.Value, Galaxy: n.Galaxy, Via: l.via})
+		head = append(head, PathHop{UUID: n.UUID, Tag: n.Tag(), Value: n.Value, Galaxy: n.Galaxy, Via: l.via})
 		n = l.prev
 	}
 	// head currently runs meet → from; reverse it.
@@ -218,7 +220,7 @@ func stitch(meet *Node, fwd, bwd map[*Node]link) []PathHop {
 	n := bwd[meet].prev
 	for n != nil {
 		l := bwd[n]
-		head = append(head, PathHop{UUID: n.UUID, Value: n.Value, Galaxy: n.Galaxy, Via: bwd[n].via})
+		head = append(head, PathHop{UUID: n.UUID, Tag: n.Tag(), Value: n.Value, Galaxy: n.Galaxy, Via: bwd[n].via})
 		n = l.prev
 	}
 	return head

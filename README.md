@@ -117,6 +117,11 @@ Results come back ranked, with the reason for each match (`value`, `synonym`,
 `value_prefix`, `synonym_prefix`, `substring`), a `degree`, and an `ambiguous`
 flag. Pass `group` to get them bucketed by galaxy.
 
+Every result also carries its canonical MISP tag —
+`misp-galaxy:threat-actor="APT28"` — which is what attaches to a MISP event. A
+UUID identifies the entry but attaches to nothing, so quote the tag whenever
+the answer is heading anywhere near MISP.
+
 Entries the corpus marks `revoked` are still returned, flagged and ranked below
 every live entry: an older report may legitimately cite a revoked identifier,
 and finding nothing is worse than finding it flagged.
@@ -227,14 +232,6 @@ exported trail.
 ---
 
 ## Known gaps
-
-**No tests.** The Python sibling has 73; this has none, and the two-pass loader
-and the bidirectional path search are exactly the kind of code a refactor breaks
-quietly.
-
-**No canonical MISP tags.** Results carry UUIDs, not
-`misp-galaxy:threat-actor="APT28"`. In a MISP workflow the tag is what gets
-attached to an event; a UUID attaches to nothing.
 
 **References are not in the graph.** They live in each entry's `meta.refs`. The
 `references` galaxy exists and holds 5,000+ entries, but nothing links to it, so

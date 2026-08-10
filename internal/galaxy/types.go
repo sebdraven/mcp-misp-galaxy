@@ -7,7 +7,10 @@
 // and it is collected normally.
 package galaxy
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // ---- on-disk shapes ---------------------------------------------------------
 //
@@ -103,6 +106,37 @@ type Node struct {
 type Edge struct {
 	To   *Node
 	Type string
+}
+
+// TagNamespace prefixes every canonical MISP galaxy tag.
+const TagNamespace = "misp-galaxy"
+
+// Tag renders the canonical MISP tag for this entry, e.g.
+//
+//	misp-galaxy:threat-actor="APT28"
+//
+// This is what gets attached to a MISP event. A UUID identifies the entry but
+// attaches to nothing, so every result carries the tag alongside it.
+//
+// Empty for a dangling node: it has no galaxy and no value, so there is
+// nothing to tag with.
+func (n *Node) Tag() string {
+	if n == nil || n.Galaxy == "" || n.Value == "" {
+		return ""
+	}
+	return Tag(n.Galaxy, n.Value)
+}
+
+// Tag builds a canonical MISP galaxy tag from a galaxy type and a value.
+//
+// A handful of corpus values contain a double quote, which would break the
+// quoted form; they are escaped rather than dropped, since a tag that cannot
+// round-trip is worse than an unusual-looking one.
+func Tag(galaxyType, value string) string {
+	if galaxyType == "" || value == "" {
+		return ""
+	}
+	return TagNamespace + ":" + galaxyType + `="` + strings.ReplaceAll(value, `"`, `\"`) + `"`
 }
 
 // GalaxyInfo describes one galaxy and how many nodes it contributed.

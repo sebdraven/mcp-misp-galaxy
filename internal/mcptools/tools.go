@@ -33,7 +33,8 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"Searches a threat-intelligence subset of the corpus by default \u2014 misp-galaxy also carries unrelated taxonomies " +
 			"(firearms, culture collections, economic activity codes) that would otherwise pollute results. " +
 			"The 'scope' field of the answer says what was actually searched. " +
-			"Entries the corpus has deprecated are still returned, flagged 'revoked' and ranked last.",
+			"Entries the corpus has deprecated are still returned, flagged 'revoked' and ranked last. " +
+			"Every result carries a 'tag': the canonical MISP galaxy tag, which is what attaches to a MISP event — quote that rather than the uuid when the answer is going anywhere near MISP.",
 	}, r.resolve)
 
 	mcp.AddTool(s, &mcp.Tool{
