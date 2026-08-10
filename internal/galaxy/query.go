@@ -102,6 +102,7 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 			n := Neighbour{
 				UUID: e.To.UUID, Tag: e.To.Tag(), Value: e.To.Value, Galaxy: e.To.Galaxy,
 				Depth: cur.depth + 1, Via: e.Type,
+				Confidence: e.Confidence, Bridge: e.Bridge,
 				FromUUID: cur.node.UUID, Dangling: e.To.Dangling,
 			}
 			if opt.WithPaths {
@@ -200,8 +201,10 @@ func (g *Graph) ShortestPath(fromUUID, toUUID string, maxDepth int, edgeTypes []
 
 // link records how a node was reached during a bidirectional search.
 type link struct {
-	prev *Node
-	via  string
+	prev       *Node
+	via        string
+	confidence int
+	bridge     bool
 }
 
 // stitch rebuilds the full route from the meeting node outward to both ends.
@@ -209,25 +212,34 @@ func stitch(meet *Node, fwd, bwd map[*Node]link) []PathHop {
 	var head []PathHop
 	for n := meet; n != nil; {
 		l := fwd[n]
-		head = append(head, PathHop{UUID: n.UUID, Tag: n.Tag(), Value: n.Value, Galaxy: n.Galaxy, Via: l.via})
+		head = append(head, PathHop{
+			UUID: n.UUID, Tag: n.Tag(), Value: n.Value, Galaxy: n.Galaxy,
+			Via: l.via, Confidence: l.confidence, Bridge: l.bridge,
+		})
 		n = l.prev
 	}
-	// head currently runs meet → from; reverse it.
-	for i, j := 0, len(head)-1; i < j; i, j = i+1, j-1 {
-		head[i], head[j] = head[j], head[i]
-	}
-	// The first hop has no incoming relation.
+	head = reverseHops(head)
 	if len(head) > 0 {
-		head[0].Via = ""
+		head[0].Via, head[0].Confidence, head[0].Bridge = "", 0, false
 	}
 
 	n := bwd[meet].prev
 	for n != nil {
 		l := bwd[n]
-		head = append(head, PathHop{UUID: n.UUID, Tag: n.Tag(), Value: n.Value, Galaxy: n.Galaxy, Via: bwd[n].via})
+		head = append(head, PathHop{
+			UUID: n.UUID, Tag: n.Tag(), Value: n.Value, Galaxy: n.Galaxy,
+			Via: l.via, Confidence: l.confidence, Bridge: l.bridge,
+		})
 		n = l.prev
 	}
 	return head
+}
+
+func reverseHops(h []PathHop) []PathHop {
+	for i, j := 0, len(h)-1; i < j; i, j = i+1, j-1 {
+		h[i], h[j] = h[j], h[i]
+	}
+	return h
 }
 
 func edgesOf(n *Node, d Direction) []Edge {
