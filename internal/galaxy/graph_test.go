@@ -468,6 +468,65 @@ func TestNeighboursCarryConfidenceAndBridge(t *testing.T) {
 	}
 }
 
+// twoWayGraph builds A and B linked from both sides under different relation
+// types — the shape that merging edges makes tricky.
+func twoWayGraph(t *testing.T) *Graph {
+	t.Helper()
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters, "left", []map[string]any{
+		{"value": "A", "uuid": "u-a", "related": []map[string]any{
+			{"dest-uuid": "u-b", "type": "used-by"},
+		}},
+	})
+	writeCluster(t, clusters, "right", []map[string]any{
+		{"value": "B", "uuid": "u-b", "related": []map[string]any{
+			{"dest-uuid": "u-a", "type": "similar"},
+		}},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	return g
+}
+
+func TestEdgeTypeFilterSeesEveryDeclaredType(t *testing.T) {
+	// Merging keeps one type as the primary; filtering on the other must still
+	// find the link, and must report the type that actually matched.
+	g := twoWayGraph(t)
+	for _, want := range []string{"used-by", "similar"} {
+		found := g.Neighbours("u-a", NeighbourOpts{Depth: 1, EdgeTypes: []string{want}})
+		if len(found) != 1 {
+			t.Fatalf("filtering on %q found %d neighbours, want 1", want, len(found))
+		}
+		if found[0].Via != want {
+			t.Errorf("filtering on %q reported via=%q", want, found[0].Via)
+		}
+	}
+	if got := g.Neighbours("u-a", NeighbourOpts{Depth: 1, EdgeTypes: []string{"nope"}}); len(got) != 0 {
+		t.Errorf("an unmatched type should find nothing, got %+v", got)
+	}
+}
+
+func TestDirectionReflectsWhatTheCorpusDeclared(t *testing.T) {
+	// Both nodes declare the relation, so each must see it as outgoing. Merging
+	// the two declarations into one oriented edge would make this depend on
+	// which cluster file was read first.
+	g := twoWayGraph(t)
+	for _, uuid := range []string{"u-a", "u-b"} {
+		if got := g.Neighbours(uuid, NeighbourOpts{Depth: 1, Direction: Out}); len(got) != 1 {
+			t.Errorf("%s declares the relation outbound, Out found %d", uuid, len(got))
+		}
+		if got := g.Neighbours(uuid, NeighbourOpts{Depth: 1, Direction: In}); len(got) != 1 {
+			t.Errorf("%s is declared upon inbound, In found %d", uuid, len(got))
+		}
+	}
+}
+
 // ---- traversal --------------------------------------------------------------
 
 func TestNeighboursFollowsRelationBackwards(t *testing.T) {
