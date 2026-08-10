@@ -608,6 +608,48 @@ func TestMaxGroupCountDropsGeneric(t *testing.T) {
 	}
 }
 
+func TestMaxGroupCountBlocksTraversalNotJustReporting(t *testing.T) {
+	// a-1 reaches a-2 and a-3 only through t-common, the technique all three
+	// share. Filtering it out must make them unreachable, not merely hidden:
+	// a generic entry is a hub, and routing through it manufactures adjacency
+	// between actors whose only connection is that everyone does the same
+	// ordinary thing.
+	//
+	// This is the opposite of the galaxy filter, which selects what is reported
+	// while still walking through what it excludes. The two must not drift into
+	// behaving the same way.
+	g := actorGraph(t)
+
+	wide := g.Neighbours("a-1", NeighbourOpts{Depth: 2})
+	if !containsUUID(wide, "a-2") {
+		t.Fatalf("without the filter a-2 should be reachable at depth 2, got %+v", wide)
+	}
+
+	narrow := g.Neighbours("a-1", NeighbourOpts{Depth: 2, MaxGroupCount: 2})
+	if containsUUID(narrow, "a-2") || containsUUID(narrow, "a-3") {
+		t.Errorf("actors reachable only through a generic hub must not be returned, got %+v", narrow)
+	}
+	for _, n := range narrow {
+		if n.UUID == "t-common" {
+			t.Errorf("the generic entry itself must not be returned")
+		}
+	}
+}
+
+func TestMaxGroupCountKeepsGenericOutOfPaths(t *testing.T) {
+	// A filtered node must not turn up inside a recorded route either — a path
+	// that runs through an entry the caller excluded is worse than no path.
+	g := actorGraph(t)
+	found := g.Neighbours("a-1", NeighbourOpts{Depth: 2, MaxGroupCount: 2, WithPaths: true})
+	for _, n := range found {
+		for _, hop := range n.Path {
+			if hop == "t-common" {
+				t.Errorf("path to %s runs through the filtered entry: %v", n.UUID, n.Path)
+			}
+		}
+	}
+}
+
 func TestMostGenericRanksWorstFirst(t *testing.T) {
 	g := actorGraph(t)
 	top := g.MostGeneric("mitre-attack-pattern", 5)

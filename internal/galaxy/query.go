@@ -50,7 +50,7 @@ type NeighbourOpts struct {
 
 	// MaxGroupCount drops entries linked to more than this many threat actors:
 	// the generic behaviours every group shares, which therefore distinguish
-	// none of them.
+	// none of them. Unlike Galaxies, this blocks traversal as well as reporting.
 	MaxGroupCount int
 
 	Limit      int       // max nodes returned, default 200
@@ -58,10 +58,11 @@ type NeighbourOpts struct {
 	SkipGhosts bool      // drop dangling nodes from the result
 }
 
-// GenericThreshold is where an entry stops being a usable signature.
+// GenericThreshold is where an entry stops being a usable signature: linked to
+// this many actors or more.
 //
-// Ten actors is a judgement call, not a measured boundary: the literature
-// ranks entries by actor count rather than declaring a cut-off, because the
+// Ten is a judgement call, not a measured boundary: the literature ranks
+// entries by actor count rather than declaring a cut-off, because the
 // distribution is continuous. The flag is a reading aid; group_count is the
 // number to reason with.
 const GenericThreshold = 10
@@ -105,6 +106,16 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 			if !ok || visited[e.To] {
 				continue
 			}
+			// Generic entries block the walk rather than merely being hidden
+			// from it — the opposite of the galaxy filter below, and
+			// deliberately so. A technique shared by dozens of actors is a hub:
+			// routing through it connects everything to everything, which
+			// manufactures adjacency that means nothing. A galaxy outside the
+			// filter is just uninteresting to report; a generic node is
+			// actively misleading to travel through.
+			if opt.MaxGroupCount > 0 && e.To.GroupCount > opt.MaxGroupCount {
+				continue
+			}
 			visited[e.To] = true
 
 			path := append(append([]string(nil), cur.path...), e.To.UUID)
@@ -114,9 +125,6 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 				continue
 			}
 			if opt.Galaxies != nil && inScope != nil && !inScope[strings.ToLower(e.To.Galaxy)] {
-				continue
-			}
-			if opt.MaxGroupCount > 0 && e.To.GroupCount > opt.MaxGroupCount {
 				continue
 			}
 			n := Neighbour{
