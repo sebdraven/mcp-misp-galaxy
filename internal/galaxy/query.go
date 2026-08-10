@@ -260,16 +260,42 @@ func edgesOf(n *Node, d Direction) []Edge {
 	}
 }
 
-func edgeFilter(types []string) func(string) bool {
+func edgeFilter(types []string) map[string]struct{} {
 	if len(types) == 0 {
-		return func(string) bool { return true }
+		return nil
 	}
 	set := make(map[string]struct{}, len(types))
 	for _, t := range types {
-		set[strings.ToLower(strings.TrimSpace(t))] = struct{}{}
+		if t = strings.ToLower(strings.TrimSpace(t)); t != "" {
+			set[t] = struct{}{}
+		}
 	}
-	return func(t string) bool {
-		_, ok := set[strings.ToLower(t)]
-		return ok
+	if len(set) == 0 {
+		return nil
 	}
+	return set
+}
+
+// matches reports whether an edge passes a relation-type filter, and which
+// type satisfied it.
+//
+// Every declared type is checked, not just the first: links are merged, so a
+// relation declared used-by from one side and similar from the other carries
+// both, and filtering on either must find it. Testing only Type would silently
+// drop links the caller explicitly asked for.
+func (e Edge) matches(keep map[string]struct{}) (bool, string) {
+	if keep == nil {
+		return true, e.Type
+	}
+	if _, ok := keep[strings.ToLower(e.Type)]; ok {
+		return true, e.Type
+	}
+	for _, t := range e.Types {
+		if _, ok := keep[strings.ToLower(t)]; ok {
+			// Report the type that matched rather than the first declared: a
+			// caller filtering on "similar" should see "similar" as the hop.
+			return true, t
+		}
+	}
+	return false, ""
 }
