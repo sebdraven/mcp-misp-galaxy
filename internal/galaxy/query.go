@@ -85,7 +85,8 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 			continue
 		}
 		for _, e := range edgesOf(cur.node, opt.Direction) {
-			if !keep(e.Type) || visited[e.To] {
+			ok, via := e.matches(keep)
+			if !ok || visited[e.To] {
 				continue
 			}
 			visited[e.To] = true
@@ -101,7 +102,7 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 			}
 			n := Neighbour{
 				UUID: e.To.UUID, Tag: e.To.Tag(), Value: e.To.Value, Galaxy: e.To.Galaxy,
-				Depth: cur.depth + 1, Via: e.Type,
+				Depth: cur.depth + 1, Via: via,
 				Confidence: e.Confidence, Bridge: e.Bridge,
 				FromUUID: cur.node.UUID, Dangling: e.To.Dangling,
 			}
@@ -167,13 +168,14 @@ func (g *Graph) ShortestPath(fromUUID, toUUID string, maxDepth int, edgeTypes []
 		var next []*Node
 		for _, n := range front {
 			for _, e := range edgesOf(n, Both) {
-				if !keep(e.Type) {
+				ok, via := e.matches(keep)
+				if !ok {
 					continue
 				}
 				if _, been := seen[e.To]; been {
 					continue
 				}
-				seen[e.To] = link{prev: n, via: e.Type, confidence: e.Confidence, bridge: e.Bridge}
+				seen[e.To] = link{prev: n, via: via, confidence: e.Confidence, bridge: e.Bridge}
 				if _, met := other[e.To]; met {
 					return next, e.To
 				}
