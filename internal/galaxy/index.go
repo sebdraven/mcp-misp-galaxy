@@ -30,6 +30,7 @@ type Candidate struct {
 	Matched   string   `json:"matched" jsonschema:"the name or synonym that actually matched"`
 	Score     int      `json:"score"`
 	Degree    int      `json:"degree" jsonschema:"number of relations on this entry. 0 means it cannot be traversed: gx_neighbors and gx_path will return nothing from it. When several candidates name the same thing, prefer the one with a non-zero degree"`
+	GroupCount int     `json:"group_count,omitempty" jsonschema:"how many distinct threat actors are linked to this entry. High values mean the entry is generic and carries little attribution value"`
 	Revoked   bool     `json:"revoked,omitempty" jsonschema:"the corpus marks this entry as deprecated; it is ranked below live entries but still returned"`
 	Synthetic bool     `json:"synthetic,omitempty" jsonschema:"the corpus published this entry without a uuid; the uuid field is a locally derived key, not a MISP identifier, and no relation can point at it"`
 	Synonyms  []string `json:"synonyms,omitempty"`
