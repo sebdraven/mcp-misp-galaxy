@@ -238,6 +238,32 @@ func TestResolveEmptyQuery(t *testing.T) {
 	}
 }
 
+func TestDegreeBreaksTiesButDoesNotOutrankScore(t *testing.T) {
+	// u-orphan has no relations, u-actor has three. Both match "o" as a
+	// substring, so the tie is broken on degree.
+	g := chainGraph(t)
+	got := g.Resolve("o", nil, 20)
+	var orphan, actor int = -1, -1
+	for i, c := range got {
+		switch c.UUID {
+		case "u-orphan":
+			orphan = i
+		case "u-actor":
+			actor = i
+		}
+	}
+	if orphan >= 0 && actor >= 0 && got[orphan].Score == got[actor].Score && actor > orphan {
+		t.Error("at equal score, the connected entry should rank first")
+	}
+
+	// But an exact match must still beat a better-connected substring match:
+	// degree is a tiebreaker, not a ranking of its own.
+	byName := g.Resolve("Orphaned", nil, 20)
+	if len(byName) == 0 || byName[0].UUID != "u-orphan" {
+		t.Fatalf("an exact match must come first regardless of degree, got %+v", byName)
+	}
+}
+
 // ---- MISP tags ---------------------------------------------------------------
 
 func TestCandidateCarriesTheCanonicalTag(t *testing.T) {
