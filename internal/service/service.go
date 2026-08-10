@@ -201,7 +201,7 @@ func (s *Service) Node(uuid string) (NodeDetail, error) {
 		return NodeDetail{}, fmt.Errorf("%w: %s", ErrUnknownNode, uuid)
 	}
 	d := NodeDetail{
-		UUID: n.UUID, Value: n.Value, Galaxy: n.Galaxy,
+		UUID: n.UUID, Tag: n.Tag(), Value: n.Value, Galaxy: n.Galaxy,
 		Description: n.Description, Synonyms: n.Synonyms,
 		Revoked: n.Revoked, Synthetic: n.Synthetic, Dangling: n.Dangling,
 		Degree:      len(n.Out) + len(n.In),

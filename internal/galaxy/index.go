@@ -133,7 +133,7 @@ func (g *Graph) Resolve(q string, galaxies []string, limit int) []Candidate {
 			return
 		}
 		seen[n] = Candidate{
-			UUID: n.UUID, Value: n.Value, Galaxy: n.Galaxy,
+			UUID: n.UUID, Tag: n.Tag(), Value: n.Value, Galaxy: n.Galaxy,
 			Reason: reason, Matched: matched, Score: score,
 			// Degree is what tells a caller which candidate is usable for
 			// traversal. The relations in this corpus sit almost entirely in
