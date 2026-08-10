@@ -57,13 +57,14 @@ func (h *handlers) node(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) neighbours(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	opt := galaxy.NeighbourOpts{
-		Depth:      intParam(r, "depth", 1),
-		Direction:  galaxy.Direction(q.Get("direction")),
-		EdgeTypes:  csv(q.Get("type")),
-		Galaxies:   csv(q.Get("galaxy")),
-		Limit:      intParam(r, "limit", 0),
-		WithPaths:  q.Get("paths") == "1" || q.Get("paths") == "true",
-		SkipGhosts: q.Get("skip_dangling") == "1" || q.Get("skip_dangling") == "true",
+		Depth:         intParam(r, "depth", 1),
+		Direction:     galaxy.Direction(q.Get("direction")),
+		EdgeTypes:     csv(q.Get("type")),
+		Galaxies:      csv(q.Get("galaxy")),
+		MaxGroupCount: intParam(r, "max_group_count", 0),
+		Limit:         intParam(r, "limit", 0),
+		WithPaths:     q.Get("paths") == "1" || q.Get("paths") == "true",
+		SkipGhosts:    q.Get("skip_dangling") == "1" || q.Get("skip_dangling") == "true",
 	}
 	res, err := h.s.Neighbours(r.PathValue("uuid"), opt)
 	respond(w, res, err)
