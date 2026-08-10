@@ -239,11 +239,11 @@ func TestResolveEmptyQuery(t *testing.T) {
 }
 
 func TestDegreeBreaksTiesButDoesNotOutrankScore(t *testing.T) {
-	// u-orphan has no relations, u-actor has three. Both match "o" as a
-	// substring, so the tie is broken on degree.
+	// Tie-break: at equal score, higher-degree candidates should rank first.
 	g := chainGraph(t)
 	got := g.Resolve("o", nil, 20)
-	var orphan, actor int = -1, -1
+
+	orphan, actor := -1, -1
 	for i, c := range got {
 		switch c.UUID {
 		case "u-orphan":
@@ -252,15 +252,63 @@ func TestDegreeBreaksTiesButDoesNotOutrankScore(t *testing.T) {
 			actor = i
 		}
 	}
-	if orphan >= 0 && actor >= 0 && got[orphan].Score == got[actor].Score && actor > orphan {
-		t.Error("at equal score, the connected entry should rank first")
+	if orphan == -1 || actor == -1 {
+		t.Fatalf("expected u-orphan and u-actor in results, got %+v", got)
+	}
+	if got[orphan].Score != got[actor].Score {
+		t.Fatalf("expected equal scores for tie-break check, got orphan=%d actor=%d (scores %d vs %d)", orphan, actor, got[orphan].Score, got[actor].Score)
+	}
+	if got[actor].Degree <= got[orphan].Degree {
+		t.Fatalf("expected u-actor to have higher degree than u-orphan for tie-break check, got %d vs %d", got[actor].Degree, got[orphan].Degree)
+	}
+	if actor > orphan {
+		t.Fatalf("at equal score, the connected entry should rank first: actor=%d orphan=%d", actor, orphan)
 	}
 
-	// But an exact match must still beat a better-connected substring match:
-	// degree is a tiebreaker, not a ranking of its own.
-	byName := g.Resolve("Orphaned", nil, 20)
-	if len(byName) == 0 || byName[0].UUID != "u-orphan" {
-		t.Fatalf("an exact match must come first regardless of degree, got %+v", byName)
+	// Precedence: degree must not outrank a better score (exact match should beat
+	// a better-connected prefix/substring match).
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters, "test", []map[string]any{
+		{"value": "Alpha", "uuid": "u-alpha", "meta": map[string]any{}},
+		{"value": "Alpha Extended", "uuid": "u-alpha-ext", "related": []map[string]any{
+			{"dest-uuid": "u-x1", "type": "rel"},
+			{"dest-uuid": "u-x2", "type": "rel"},
+			{"dest-uuid": "u-x3", "type": "rel"},
+		}},
+		{"value": "Other", "uuid": "u-other", "related": []map[string]any{
+			{"dest-uuid": "u-alpha-ext", "type": "rel"},
+		}},
+	})
+	g2, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got2 := g2.Resolve("Alpha", nil, 10)
+	if len(got2) < 2 {
+		t.Fatalf("expected both exact and prefix matches, got %+v", got2)
+	}
+	if got2[0].UUID != "u-alpha" {
+		t.Fatalf("exact match must come first regardless of degree, got %+v", got2)
+	}
+
+	degAlpha, degExt := -1, -1
+	for _, c := range got2 {
+		switch c.UUID {
+		case "u-alpha":
+			degAlpha = c.Degree
+		case "u-alpha-ext":
+			degExt = c.Degree
+		}
+	}
+	if degAlpha == -1 || degExt == -1 {
+		t.Fatalf("expected both u-alpha and u-alpha-ext in results, got %+v", got2)
+	}
+	if degExt <= degAlpha {
+		t.Fatalf("expected prefix match to be more connected for precedence check, got degrees %d vs %d", degExt, degAlpha)
 	}
 }
 
