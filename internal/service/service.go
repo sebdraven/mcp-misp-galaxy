@@ -254,6 +254,12 @@ type PathResult struct {
 	Found bool             `json:"found"`
 	Hops  int              `json:"hops"`
 	Path  []galaxy.PathHop `json:"path,omitempty"`
+
+	// WeakestLink names the least-supported hop on the route. A path is only
+	// as good as its worst assertion, and a single-declaration bridge in the
+	// middle means the whole connection rests on one unverified claim.
+	WeakestLink string `json:"weakest_link,omitempty" jsonschema:"the hop the route depends on most, when one stands out as weak"`
+	Caveat      string `json:"caveat,omitempty" jsonschema:"present when the route should not be read as established fact"`
 }
 
 // Path finds a shortest route between two entries.
@@ -272,6 +278,18 @@ func (s *Service) Path(from, to string, maxDepth int, edgeTypes []string) (PathR
 	res := PathResult{From: from, To: to, Found: len(hops) > 0, Path: hops}
 	if len(hops) > 0 {
 		res.Hops = len(hops) - 1
+	}
+
+	// Flag the weakest hop: a bridge backed by one declaration is exactly the
+	// shape of the mis-links documented in the threat-actor naming literature,
+	// where one wrong assertion fused two unrelated clusters.
+	for i := 1; i < len(hops); i++ {
+		if hops[i].Bridge && hops[i].Confidence <= 1 {
+			res.WeakestLink = fmt.Sprintf("%s -> %s (%s)",
+				hops[i-1].Value, hops[i].Value, hops[i].Via)
+			res.Caveat = "this route depends on a single-declaration link that is the only join between the two sides; treat the connection as provisional"
+			break
+		}
 	}
 	return res, nil
 }
