@@ -20,15 +20,17 @@ const (
 
 // Neighbour is one node reached from a starting point.
 type Neighbour struct {
-	UUID     string   `json:"uuid"`
-	Tag      string   `json:"tag,omitempty" jsonschema:"canonical MISP galaxy tag for this entry"`
-	Value    string   `json:"value,omitempty"`
-	Galaxy   string   `json:"galaxy,omitempty"`
-	Depth    int      `json:"depth"`
-	Via      string   `json:"via" jsonschema:"type of the relation on the last hop"`
-	FromUUID string   `json:"from_uuid" jsonschema:"node this one was reached from"`
-	Dangling bool     `json:"dangling,omitempty" jsonschema:"referenced by a relation but not defined in this checkout"`
-	Path     []string `json:"path,omitempty" jsonschema:"uuids from the origin to this node, when requested"`
+	UUID       string   `json:"uuid"`
+	Tag        string   `json:"tag,omitempty" jsonschema:"canonical MISP galaxy tag for this entry"`
+	Value      string   `json:"value,omitempty"`
+	Galaxy     string   `json:"galaxy,omitempty"`
+	Depth      int      `json:"depth"`
+	Via        string   `json:"via" jsonschema:"type of the relation on the last hop"`
+	Confidence int      `json:"confidence" jsonschema:"how many declarations back the last hop; 1 means a single unconfirmed assertion"`
+	Bridge     bool     `json:"bridge,omitempty" jsonschema:"the last hop is the only link joining these two parts of the graph. A bridge with confidence 1 rests on one unverified assertion and should be treated as provisional"`
+	FromUUID   string   `json:"from_uuid" jsonschema:"node this one was reached from"`
+	Dangling   bool     `json:"dangling,omitempty" jsonschema:"referenced by a relation but not defined in this checkout"`
+	Path       []string `json:"path,omitempty" jsonschema:"uuids from the origin to this node, when requested"`
 }
 
 // NeighbourOpts tunes a traversal.
@@ -123,11 +125,13 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 
 // PathHop is one step along a discovered path.
 type PathHop struct {
-	UUID   string `json:"uuid"`
-	Tag    string `json:"tag,omitempty" jsonschema:"canonical MISP galaxy tag for this entry"`
-	Value  string `json:"value,omitempty"`
-	Galaxy string `json:"galaxy,omitempty"`
-	Via    string `json:"via,omitempty" jsonschema:"relation type taken to reach this node"`
+	UUID       string `json:"uuid"`
+	Tag        string `json:"tag,omitempty" jsonschema:"canonical MISP galaxy tag for this entry"`
+	Value      string `json:"value,omitempty"`
+	Galaxy     string `json:"galaxy,omitempty"`
+	Via        string `json:"via,omitempty" jsonschema:"relation type taken to reach this node"`
+	Confidence int    `json:"confidence,omitempty" jsonschema:"declarations backing the hop that reached this node"`
+	Bridge     bool   `json:"bridge,omitempty" jsonschema:"this hop is the only link between the two sides; the path depends entirely on it"`
 }
 
 // ShortestPath finds a shortest route between two nodes using a bidirectional
@@ -168,7 +172,7 @@ func (g *Graph) ShortestPath(fromUUID, toUUID string, maxDepth int, edgeTypes []
 				if _, been := seen[e.To]; been {
 					continue
 				}
-				seen[e.To] = link{prev: n, via: e.Type}
+				seen[e.To] = link{prev: n, via: e.Type, confidence: e.Confidence, bridge: e.Bridge}
 				if _, met := other[e.To]; met {
 					return next, e.To
 				}
