@@ -238,6 +238,55 @@ func TestResolveEmptyQuery(t *testing.T) {
 	}
 }
 
+// ---- MISP tags ---------------------------------------------------------------
+
+func TestCandidateCarriesTheCanonicalTag(t *testing.T) {
+	// The tag is what attaches to a MISP event; a uuid attaches to nothing.
+	g := chainGraph(t)
+	got := g.Resolve("Someone", nil, 10)
+	if len(got) != 1 {
+		t.Fatalf("expected one candidate, got %d", len(got))
+	}
+	if want := `misp-galaxy:threat-actor="Someone"`; got[0].Tag != want {
+		t.Errorf("tag = %q, want %q", got[0].Tag, want)
+	}
+}
+
+func TestNeighbourAndPathCarryTags(t *testing.T) {
+	g := chainGraph(t)
+	for _, n := range g.Neighbours("u-nasty", NeighbourOpts{Depth: 2}) {
+		if n.Dangling {
+			continue
+		}
+		if n.Tag == "" {
+			t.Errorf("neighbour %s has no tag", n.UUID)
+		}
+	}
+	for _, h := range g.ShortestPath("u-nasty", "u-report", 6, nil) {
+		if h.Tag == "" {
+			t.Errorf("path hop %s has no tag", h.UUID)
+		}
+	}
+}
+
+func TestDanglingNodeHasNoTag(t *testing.T) {
+	// A dangling node has neither galaxy nor value, so there is nothing to tag
+	// with — emitting misp-galaxy:="" would be worse than emitting nothing.
+	g := chainGraph(t)
+	missing, _ := g.Node("u-missing")
+	if tag := missing.Tag(); tag != "" {
+		t.Errorf("dangling node produced tag %q", tag)
+	}
+}
+
+func TestTagEscapesQuotes(t *testing.T) {
+	// Rare, but a value containing a double quote would otherwise produce a tag
+	// that cannot be parsed back.
+	if got, want := Tag("tool", `He said "hi"`), `misp-galaxy:tool="He said \"hi\""`; got != want {
+		t.Errorf("Tag() = %q, want %q", got, want)
+	}
+}
+
 // ---- traversal --------------------------------------------------------------
 
 func TestNeighboursFollowsRelationBackwards(t *testing.T) {
