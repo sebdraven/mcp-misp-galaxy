@@ -188,32 +188,36 @@ func Load(root, sourceRef string, opts ...LoadOption) (*Graph, error) {
 	}
 	report("relations", len(deferred), len(deferred))
 
-	// Materialise. Direction is preserved from the first declaration seen, so
-	// callers asking for Out or In still get what the corpus actually stated.
-	for i, p := range deferred {
+	// Materialise one edge per *declared* direction, all sharing the merged
+	// link's confidence and types.
+	//
+	// Collapsing a two-way link into a single oriented edge would make Out and
+	// In depend on which cluster file happened to be read first, so an Out-only
+	// traversal could hide a relation the node genuinely declares. Direction has
+	// to keep reflecting what the corpus stated, not what the loader saw first.
+	materialised := make(map[[2]string]bool, len(links))
+	for _, p := range deferred {
 		for _, rel := range p.rel {
 			if rel.DestUUID == "" || rel.DestUUID == p.from {
 				continue
 			}
-			key := [2]string{p.from, rel.DestUUID}
-			if key[0] > key[1] {
-				key[0], key[1] = key[1], key[0]
+			directed := [2]string{p.from, rel.DestUUID}
+			if materialised[directed] {
+				continue // same direction declared twice
 			}
-			info := links[key]
-			if info == nil || info.confidence == 0 {
-				continue // already materialised for this pair
-			}
-			from, to := g.nodes[p.from], g.nodes[rel.DestUUID]
+			materialised[directed] = true
+
+			info := links[pairKey(p.from, rel.DestUUID)]
 			sort.Strings(info.types)
-			from.Out = append(from.Out, Edge{
-				To: to, Type: info.firstType, Types: info.types, Confidence: info.confidence,
-			})
-			to.In = append(to.In, Edge{
-				To: from, Type: info.firstType, Types: info.types, Confidence: info.confidence,
-			})
-			info.confidence = 0 // mark as materialised
+			from, to := g.nodes[p.from], g.nodes[rel.DestUUID]
+			edge := Edge{
+				Type: info.firstType, Types: info.types, Confidence: info.confidence,
+			}
+			edge.To = to
+			from.Out = append(from.Out, edge)
+			edge.To = from
+			to.In = append(to.In, edge)
 		}
-		_ = i
 	}
 	edges := len(links)
 
