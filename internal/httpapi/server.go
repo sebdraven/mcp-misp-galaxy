@@ -23,6 +23,7 @@ func Handler(s *service.Service) http.Handler {
 	mux.HandleFunc("GET /neighbors/{uuid}", h.neighbours)
 	mux.HandleFunc("GET /path", h.path)
 	mux.HandleFunc("GET /galaxies", h.galaxies)
+	mux.HandleFunc("GET /generic", h.generic)
 	mux.HandleFunc("GET /status", h.status)
 
 	// Mutating the corpus is a POST: it changes what every subsequent answer
@@ -81,6 +82,11 @@ func (h *handlers) path(w http.ResponseWriter, r *http.Request) {
 
 func (h *handlers) galaxies(w http.ResponseWriter, r *http.Request) {
 	res, err := h.s.Galaxies()
+	respond(w, res, err)
+}
+
+func (h *handlers) generic(w http.ResponseWriter, r *http.Request) {
+	res, err := h.s.MostGeneric(r.URL.Query().Get("galaxy"), intParam(r, "limit", 0))
 	respond(w, res, err)
 }
 

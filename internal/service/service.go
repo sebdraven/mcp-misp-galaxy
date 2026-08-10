@@ -305,6 +305,29 @@ func (s *Service) Galaxies() ([]galaxy.GalaxyInfo, error) {
 	return g.Galaxies(), nil
 }
 
+// GenericResult lists the least discriminating entries of a galaxy.
+type GenericResult struct {
+	Galaxy  string             `json:"galaxy,omitempty"`
+	Count   int                `json:"count"`
+	Entries []galaxy.Candidate `json:"entries"`
+	Note    string             `json:"note"`
+}
+
+// MostGeneric returns the entries linked to the most threat actors.
+func (s *Service) MostGeneric(galaxyType string, limit int) (GenericResult, error) {
+	g, err := s.graph()
+	if err != nil {
+		return GenericResult{}, err
+	}
+	entries := g.MostGeneric(galaxyType, limit)
+	return GenericResult{
+		Galaxy:  galaxyType,
+		Count:   len(entries),
+		Entries: entries,
+		Note:    "these entries are used by many actors; their presence in an intrusion does not point at any of them",
+	}, nil
+}
+
 // StatusResult combines graph stats with the state of the data checkout.
 type StatusResult struct {
 	Loaded bool         `json:"loaded"`
