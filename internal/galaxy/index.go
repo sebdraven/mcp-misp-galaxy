@@ -210,6 +210,14 @@ func (g *Graph) Resolve(q string, galaxies []string, limit int) []Candidate {
 		if out[i].Score != out[j].Score {
 			return out[i].Score > out[j].Score
 		}
+		// Degree breaks ties, because relations are concentrated in the MITRE
+		// galaxies: an entry matched through a synonym may be the only
+		// traversable one while two exact matches lead nowhere. Secondary only
+		// — match quality still decides first, so a weak match never climbs
+		// above a strong one on connectivity alone.
+		if out[i].Degree != out[j].Degree {
+			return out[i].Degree > out[j].Degree
+		}
 		if out[i].Value != out[j].Value {
 			return out[i].Value < out[j].Value
 		}

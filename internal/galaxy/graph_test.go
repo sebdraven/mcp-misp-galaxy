@@ -238,6 +238,91 @@ func TestResolveEmptyQuery(t *testing.T) {
 	}
 }
 
+func TestDegreeBreaksTiesButDoesNotOutrankScore(t *testing.T) {
+	// Tie-break: the same value in two galaxies, so both score identically as
+	// exact matches and only degree can separate them. A shared fixture will
+	// not do here — two entries matching the same query at the same score is
+	// precisely the situation this rule exists for, and it has to be built.
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters, "lonely", []map[string]any{
+		{"value": "Twin", "uuid": "u-lonely", "meta": map[string]any{}},
+	})
+	writeCluster(t, clusters, "linked", []map[string]any{
+		{"value": "Twin", "uuid": "u-linked", "related": []map[string]any{
+			{"dest-uuid": "u-x1", "type": "rel"},
+			{"dest-uuid": "u-x2", "type": "rel"},
+		}},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	got := g.Resolve("Twin", nil, 10)
+	if len(got) != 2 {
+		t.Fatalf("expected both twins, got %+v", got)
+	}
+	if got[0].Score != got[1].Score {
+		t.Fatalf("the fixture must produce equal scores for this to test anything, got %d vs %d",
+			got[0].Score, got[1].Score)
+	}
+	if got[0].Degree == got[1].Degree {
+		t.Fatalf("the fixture must produce different degrees, got %d vs %d",
+			got[0].Degree, got[1].Degree)
+	}
+	if got[0].UUID != "u-linked" {
+		t.Fatalf("at equal score the connected entry should rank first, got %+v", got)
+	}
+
+	// Precedence: degree must not outrank a better score — an exact match beats
+	// a better-connected prefix match.
+	root2 := t.TempDir()
+	clusters2 := filepath.Join(root2, "clusters")
+	if err := os.MkdirAll(clusters2, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters2, "test", []map[string]any{
+		{"value": "Alpha", "uuid": "u-alpha", "meta": map[string]any{}},
+		{"value": "Alpha Extended", "uuid": "u-alpha-ext", "related": []map[string]any{
+			{"dest-uuid": "u-x1", "type": "rel"},
+			{"dest-uuid": "u-x2", "type": "rel"},
+			{"dest-uuid": "u-x3", "type": "rel"},
+		}},
+	})
+	g2, err := Load(root2, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	got2 := g2.Resolve("Alpha", nil, 10)
+	if len(got2) < 2 {
+		t.Fatalf("expected both exact and prefix matches, got %+v", got2)
+	}
+	degAlpha, degExt := -1, -1
+	for _, c := range got2 {
+		switch c.UUID {
+		case "u-alpha":
+			degAlpha = c.Degree
+		case "u-alpha-ext":
+			degExt = c.Degree
+		}
+	}
+	if degAlpha == -1 || degExt == -1 {
+		t.Fatalf("expected both u-alpha and u-alpha-ext in results, got %+v", got2)
+	}
+	if degExt <= degAlpha {
+		t.Fatalf("the fixture must make the prefix match better connected, got %d vs %d",
+			degExt, degAlpha)
+	}
+	if got2[0].UUID != "u-alpha" {
+		t.Fatalf("an exact match must come first regardless of degree, got %+v", got2)
+	}
+}
+
 // ---- MISP tags ---------------------------------------------------------------
 
 func TestCandidateCarriesTheCanonicalTag(t *testing.T) {
