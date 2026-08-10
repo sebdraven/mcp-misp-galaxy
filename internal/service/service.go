@@ -307,10 +307,10 @@ func (s *Service) Galaxies() ([]galaxy.GalaxyInfo, error) {
 
 // GenericResult lists the least discriminating entries of a galaxy.
 type GenericResult struct {
-	Galaxy  string             `json:"galaxy,omitempty"`
-	Count   int                `json:"count"`
-	Entries []galaxy.Candidate `json:"entries"`
-	Note    string             `json:"note"`
+	Galaxy  string                `json:"galaxy,omitempty"`
+	Count   int                   `json:"count"`
+	Entries []galaxy.GenericEntry `json:"entries"`
+	Note    string                `json:"note"`
 }
 
 // MostGeneric returns the entries linked to the most threat actors.

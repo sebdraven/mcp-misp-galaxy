@@ -327,17 +327,32 @@ func (g *Graph) countGroups() {
 	}
 }
 
+// GenericEntry is one entry ranked by how many actors are linked to it.
+//
+// A type of its own rather than reusing Candidate: a resolver candidate
+// carries why it matched a query, and there is no query here. Reporting an
+// empty reason and a score of zero would invite a caller to read meaning into
+// fields that never applied.
+type GenericEntry struct {
+	UUID       string `json:"uuid"`
+	Tag        string `json:"tag,omitempty"`
+	Value      string `json:"value"`
+	Galaxy     string `json:"galaxy"`
+	GroupCount int    `json:"group_count" jsonschema:"distinct threat actors linked to this entry"`
+	Degree     int    `json:"degree"`
+}
+
 // MostGeneric returns the entries of a galaxy linked to the most threat
 // actors, worst offenders first.
 //
 // Useful before reading any list of relations: these are the entries to
 // discount, because their presence says nothing about who was behind an
 // intrusion. An empty galaxyType looks across the whole corpus.
-func (g *Graph) MostGeneric(galaxyType string, limit int) []Candidate {
+func (g *Graph) MostGeneric(galaxyType string, limit int) []GenericEntry {
 	if limit <= 0 {
 		limit = 10
 	}
-	var out []Candidate
+	var out []GenericEntry
 	for _, n := range g.nodes {
 		if n.Dangling || n.GroupCount == 0 {
 			continue
@@ -345,9 +360,9 @@ func (g *Graph) MostGeneric(galaxyType string, limit int) []Candidate {
 		if galaxyType != "" && !strings.EqualFold(n.Galaxy, galaxyType) {
 			continue
 		}
-		out = append(out, Candidate{
+		out = append(out, GenericEntry{
 			UUID: n.UUID, Tag: n.Tag(), Value: n.Value, Galaxy: n.Galaxy,
-			Degree: len(n.Out) + len(n.In), GroupCount: n.GroupCount,
+			GroupCount: n.GroupCount, Degree: len(n.Out) + len(n.In),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
