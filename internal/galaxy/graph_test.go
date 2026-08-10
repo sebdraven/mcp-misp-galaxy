@@ -315,7 +315,11 @@ func TestDegreeBreaksTiesButDoesNotOutrankScore(t *testing.T) {
 		t.Fatalf("expected both u-alpha and u-alpha-ext in results, got %+v", got2)
 	}
 	if degExt <= degAlpha {
-		t.Fatalf("expected prefix match to be more connected for precedence check, got degrees %d vs %d", degExt, degAlpha)
+		t.Fatalf("the fixture must make the prefix match better connected, got %d vs %d",
+			degExt, degAlpha)
+	}
+	if got2[0].UUID != "u-alpha" {
+		t.Fatalf("an exact match must come first regardless of degree, got %+v", got2)
 	}
 }
 
