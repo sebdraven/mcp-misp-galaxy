@@ -141,8 +141,9 @@ func (g *Graph) Resolve(q string, galaxies []string, limit int) []Candidate {
 			// the MITRE galaxies: the same malware can resolve to three
 			// entries, of which only one has any edges at all, and nothing
 			// else in the result says which.
-			Degree:  len(n.Out) + len(n.In),
-			Revoked: n.Revoked, Synthetic: n.Synthetic, Synonyms: n.Synonyms,
+			Degree:     len(n.Out) + len(n.In),
+			GroupCount: n.GroupCount,
+			Revoked:    n.Revoked, Synthetic: n.Synthetic, Synonyms: n.Synonyms,
 		}
 	}
 
