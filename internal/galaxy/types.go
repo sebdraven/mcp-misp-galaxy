@@ -98,6 +98,15 @@ type Node struct {
 	// so it must never be reported as a corpus identifier.
 	Synthetic bool
 
+	// GroupCount is how many distinct threat actors are linked to this entry.
+	//
+	// It measures specificity, not importance. A technique used by 79 groups
+	// tells you almost nothing about who is behind an intrusion, while one used
+	// by a single group is a candidate behavioural signature. The CTI
+	// literature is blunt about this: most techniques are generic, and treating
+	// them as evidence is how misattribution happens.
+	GroupCount int
+
 	Out []Edge
 	In  []Edge
 }
@@ -157,6 +166,24 @@ func Tag(galaxyType, value string) string {
 		return ""
 	}
 	return TagNamespace + ":" + galaxyType + `="` + strings.ReplaceAll(value, `"`, `\"`) + `"`
+}
+
+// ActorGalaxies are the galaxy types whose entries denote a threat actor.
+//
+// Specificity is counted against these and nothing else: "how many actors use
+// this" is the question that separates a behavioural signature from background
+// noise. Counting every neighbour instead would make a technique linked to
+// dozens of sub-techniques look popular when no actor uses it at all.
+var ActorGalaxies = map[string]bool{
+	"threat-actor":                          true,
+	"mitre-intrusion-set":                   true,
+	"mitre-enterprise-attack-intrusion-set":  true,
+	"mitre-ics-groups":                      true,
+	"mitre-mobile-attack-intrusion-set":     true,
+	"groups":                                true,
+	"microsoft-activity-group":              true,
+	"360net-threat-actor":                   true,
+	"intelligence-agency":                   true,
 }
 
 // GalaxyInfo describes one galaxy and how many nodes it contributed.
