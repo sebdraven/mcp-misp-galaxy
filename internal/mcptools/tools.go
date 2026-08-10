@@ -48,12 +48,12 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"IMPORTANT: relations in this corpus live almost entirely in the MITRE galaxies (mitre-malware, mitre-intrusion-set, mitre-attack-pattern). " +
 			"The malpedia, threat-actor and tool galaxies carry far fewer, so always start from the candidate gx_resolve reported with the highest degree. Starting from a low-degree entry for the same thing returns almost nothing. " +
 			"Traverses both directions by default, which is deliberate: relations are usually declared on one side only. " +
-			"Unlike gx_resolve this is NOT limited to the server's CTI scope \u2014 a declared relation is meaningful whatever galaxy it lands in \u2014 so use 'galaxies' to narrow.",
+			"Unlike gx_resolve this is NOT limited to the server's CTI scope \u2014 a declared relation is meaningful whatever galaxy it lands in \u2014 so use 'galaxies' to narrow. Each result carries 'confidence' (declarations backing the hop) and 'bridge' (the hop is the sole join between two parts of the graph); a bridge at confidence 1 rests on one unverified claim and should be reported as provisional.",
 	}, r.neighbours)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "gx_path",
-		Description: "Find a shortest relation path between two galaxy entries by UUID — e.g. what connects a given actor to a given malware family. Returns the chain of entries and the relation type taken at each hop. Both endpoints need relations to be connectable, so prefer the highest-degree UUID for each end: an empty path often means one endpoint has a degree of 0, not that the two are unrelated in reality.",
+		Description: "Find a shortest relation path between two galaxy entries by UUID — e.g. what connects a given actor to a given malware family. Returns the chain of entries and the relation type taken at each hop. Each hop carries a 'confidence' (how many declarations back it) and a 'bridge' flag (it is the only link joining the two sides). When 'caveat' is present the route hangs on a single unverified assertion — report the connection as provisional, not as established. Both endpoints need relations to be connectable, so prefer the highest-degree UUID for each end: an empty path often means one endpoint has a degree of 0, not that the two are unrelated in reality.",
 	}, r.path)
 
 	mcp.AddTool(s, &mcp.Tool{

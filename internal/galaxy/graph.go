@@ -152,35 +152,80 @@ func Load(root, sourceRef string, opts ...LoadOption) (*Graph, error) {
 	}
 	report("clusters", len(files), len(files))
 
-	// Pass 2 — wire the edges, materialising ghosts only for targets that are
-	// genuinely absent from the whole corpus.
-	edges := 0
+	// Pass 2 — merge the declarations into one link per pair. The corpus often
+	// declares the same relation from both sides, and sometimes under more than
+	// one type; counting those repetitions is what gives an edge its confidence.
+	type linkInfo struct {
+		confidence int
+		firstType  string
+		types      []string
+	}
+	links := make(map[[2]string]*linkInfo)
 	for i, p := range deferred {
 		if i%512 == 0 {
 			report("relations", i, len(deferred))
 		}
-		from := g.nodes[p.from]
 		for _, rel := range p.rel {
 			if rel.DestUUID == "" || rel.DestUUID == p.from {
 				continue
 			}
-			to, ok := g.nodes[rel.DestUUID]
-			if !ok {
-				to = &Node{UUID: rel.DestUUID, Dangling: true}
-				g.nodes[rel.DestUUID] = to
+			if _, ok := g.nodes[rel.DestUUID]; !ok {
+				g.nodes[rel.DestUUID] = &Node{UUID: rel.DestUUID, Dangling: true}
 			}
-			from.Out = append(from.Out, Edge{To: to, Type: rel.Type})
-			to.In = append(to.In, Edge{To: from, Type: rel.Type})
-			edges++
+			// Canonical unordered key: a link declared A→B and B→A is one
+			// link asserted twice, not two links.
+			key := pairKey(p.from, rel.DestUUID)
+			info := links[key]
+			if info == nil {
+				info = &linkInfo{firstType: rel.Type}
+				links[key] = info
+			}
+			info.confidence++
+			if rel.Type != "" && !containsString(info.types, rel.Type) {
+				info.types = append(info.types, rel.Type)
+			}
 		}
 	}
-
 	report("relations", len(deferred), len(deferred))
+
+	// Materialise one edge per *declared* direction, all sharing the merged
+	// link's confidence and types.
+	//
+	// Collapsing a two-way link into a single oriented edge would make Out and
+	// In depend on which cluster file happened to be read first, so an Out-only
+	// traversal could hide a relation the node genuinely declares. Direction has
+	// to keep reflecting what the corpus stated, not what the loader saw first.
+	materialised := make(map[[2]string]bool, len(links))
+	for _, p := range deferred {
+		for _, rel := range p.rel {
+			if rel.DestUUID == "" || rel.DestUUID == p.from {
+				continue
+			}
+			directed := [2]string{p.from, rel.DestUUID}
+			if materialised[directed] {
+				continue // same direction declared twice
+			}
+			materialised[directed] = true
+
+			info := links[pairKey(p.from, rel.DestUUID)]
+			sort.Strings(info.types)
+			from, to := g.nodes[p.from], g.nodes[rel.DestUUID]
+			edge := Edge{
+				Type: info.firstType, Types: info.types, Confidence: info.confidence,
+			}
+			edge.To = to
+			from.Out = append(from.Out, edge)
+			edge.To = from
+			to.In = append(to.In, edge)
+		}
+	}
+	edges := len(links)
 
 	report("index", 0, len(g.nodes))
 	g.buildIndex()
 	report("index", len(g.nodes), len(g.nodes))
 	g.loadGalaxyDefs(filepath.Join(root, "galaxies"))
+	bridges := g.markBridges()
 
 	dangling, revoked, synthetic := 0, 0, 0
 	for _, n := range g.nodes {
@@ -203,6 +248,7 @@ func Load(root, sourceRef string, opts ...LoadOption) (*Graph, error) {
 	g.stats = Stats{
 		Nodes:       len(g.nodes),
 		Edges:       edges,
+		Bridges:     bridges,
 		Dangling:    dangling,
 		Revoked:     revoked,
 		Synthetic:   synthetic,
@@ -257,6 +303,117 @@ const syntheticKeyPrefix = "synthetic::"
 
 func syntheticKey(galaxyType, value string) string {
 	return syntheticKeyPrefix + galaxyType + "::" + value
+}
+
+func containsString(haystack []string, needle string) bool {
+	for _, h := range haystack {
+		if h == needle {
+			return true
+		}
+	}
+	return false
+}
+
+// markBridges finds the links whose removal would increase the number of
+// connected components, and flags them on both directions of each edge.
+//
+// This matters because a single wrong assertion can fuse two unrelated
+// clusters: in the threat-actor naming literature, removing one such link from
+// the largest alias cluster cut the number of implied alias pairs by about a
+// third. A bridge with a confidence of 1 is the shape of that mistake, and
+// flagging it lets a caller treat the join as provisional rather than as fact.
+//
+// Iterative Tarjan rather than recursive: the corpus has chains long enough
+// that recursion depth becomes a needless risk.
+func (g *Graph) markBridges() int {
+	type frame struct {
+		node   *Node
+		parent *Node
+		idx    int
+		edges  []Edge
+	}
+
+	disc := make(map[*Node]int, len(g.nodes))
+	low := make(map[*Node]int, len(g.nodes))
+	bridgeSet := make(map[[2]string]bool)
+	timer := 0
+
+	for _, root := range g.nodes {
+		if _, seen := disc[root]; seen {
+			continue
+		}
+		timer++
+		disc[root], low[root] = timer, timer
+		stack := []frame{{node: root, edges: undirectedEdges(root)}}
+
+		for len(stack) > 0 {
+			top := &stack[len(stack)-1]
+			if top.idx < len(top.edges) {
+				e := top.edges[top.idx]
+				top.idx++
+				if e.To == top.parent {
+					// Skip the edge back to the parent once. A second edge to
+					// the same node would be a genuine cycle, but merged links
+					// mean that cannot happen here.
+					continue
+				}
+				if d, seen := disc[e.To]; seen {
+					if d < low[top.node] {
+						low[top.node] = d
+					}
+					continue
+				}
+				timer++
+				disc[e.To], low[e.To] = timer, timer
+				stack = append(stack, frame{node: e.To, parent: top.node, edges: undirectedEdges(e.To)})
+				continue
+			}
+
+			done := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if done.parent == nil {
+				continue
+			}
+			if low[done.node] < low[done.parent] {
+				low[done.parent] = low[done.node]
+			}
+			if low[done.node] > disc[done.parent] {
+				bridgeSet[pairKey(done.parent.UUID, done.node.UUID)] = true
+			}
+		}
+	}
+
+	for _, n := range g.nodes {
+		for i := range n.Out {
+			if bridgeSet[pairKey(n.UUID, n.Out[i].To.UUID)] {
+				n.Out[i].Bridge = true
+			}
+		}
+		for i := range n.In {
+			if bridgeSet[pairKey(n.UUID, n.In[i].To.UUID)] {
+				n.In[i].Bridge = true
+			}
+		}
+	}
+	return len(bridgeSet)
+}
+
+func pairKey(a, b string) [2]string {
+	if a > b {
+		a, b = b, a
+	}
+	return [2]string{a, b}
+}
+
+func undirectedEdges(n *Node) []Edge {
+	if len(n.In) == 0 {
+		return n.Out
+	}
+	if len(n.Out) == 0 {
+		return n.In
+	}
+	all := make([]Edge, 0, len(n.Out)+len(n.In))
+	return append(append(all, n.Out...), n.In...)
 }
 
 // ---- loading helpers --------------------------------------------------------

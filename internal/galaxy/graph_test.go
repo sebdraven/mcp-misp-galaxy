@@ -372,6 +372,171 @@ func TestTagEscapesQuotes(t *testing.T) {
 	}
 }
 
+// ---- confidence and bridges --------------------------------------------------
+
+func TestConfidenceCountsDeclarations(t *testing.T) {
+	// Two galaxies each declaring the same link: one link, asserted twice.
+	// A relation stated from both sides is better supported than one stated
+	// from a single side, and that is what confidence records.
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters, "left", []map[string]any{
+		{"value": "A", "uuid": "u-a", "related": []map[string]any{
+			{"dest-uuid": "u-b", "type": "similar"},
+		}},
+	})
+	writeCluster(t, clusters, "right", []map[string]any{
+		{"value": "B", "uuid": "u-b", "related": []map[string]any{
+			{"dest-uuid": "u-a", "type": "used-by"},
+		}},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got := g.Stats().Edges; got != 1 {
+		t.Errorf("a link declared from both sides is one edge, got %d", got)
+	}
+	a, _ := g.Node("u-a")
+	// Two adjacency entries, not one: each side declared the relation, so each
+	// sees it outbound. They describe the same link and carry the same merged
+	// confidence and types.
+	if len(a.Out) != 1 || len(a.In) != 1 {
+		t.Fatalf("expected one outgoing and one incoming entry, got %d/%d", len(a.Out), len(a.In))
+	}
+	for _, e := range append(append([]Edge{}, a.Out...), a.In...) {
+		if e.Confidence != 2 {
+			t.Errorf("confidence = %d, want 2", e.Confidence)
+		}
+		if len(e.Types) != 2 {
+			t.Errorf("both relation types should be kept, got %+v", e.Types)
+		}
+	}
+
+	// And a one-sided declaration stays at confidence 1 — otherwise the field
+	// would say nothing.
+	if got := g.Stats().Bridges; got != 1 {
+		t.Errorf("the single link joins the whole graph, bridges = %d, want 1", got)
+	}
+}
+
+func TestBridgeDetection(t *testing.T) {
+	// A triangle joined to an isolated node by one link. Only that link is a
+	// bridge: cutting any triangle edge leaves the graph connected.
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters, "ring", []map[string]any{
+		{"value": "A", "uuid": "r-a", "related": []map[string]any{
+			{"dest-uuid": "r-b", "type": "rel"},
+		}},
+		{"value": "B", "uuid": "r-b", "related": []map[string]any{
+			{"dest-uuid": "r-c", "type": "rel"},
+		}},
+		{"value": "C", "uuid": "r-c", "related": []map[string]any{
+			{"dest-uuid": "r-a", "type": "rel"},
+			{"dest-uuid": "r-far", "type": "weak"},
+		}},
+		{"value": "Far", "uuid": "r-far"},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got := g.Stats().Bridges; got != 1 {
+		t.Fatalf("expected exactly one bridge, got %d", got)
+	}
+	c, _ := g.Node("r-c")
+	for _, e := range append(append([]Edge{}, c.Out...), c.In...) {
+		wantBridge := e.To.UUID == "r-far"
+		if e.Bridge != wantBridge {
+			t.Errorf("edge to %s: bridge = %v, want %v", e.To.UUID, e.Bridge, wantBridge)
+		}
+	}
+}
+
+func TestNeighboursCarryConfidenceAndBridge(t *testing.T) {
+	g := chainGraph(t)
+	found := g.Neighbours("u-nasty", NeighbourOpts{Depth: 2})
+	for _, n := range found {
+		if n.Confidence < 1 {
+			t.Errorf("neighbour %s has confidence %d", n.UUID, n.Confidence)
+		}
+	}
+	// The chain fixture is a path, so every hop is a bridge by construction.
+	for _, n := range found {
+		if !n.Bridge {
+			t.Errorf("every link in a chain is a bridge, %s is not flagged", n.UUID)
+		}
+	}
+}
+
+// twoWayGraph builds A and B linked from both sides under different relation
+// types — the shape that merging edges makes tricky.
+func twoWayGraph(t *testing.T) *Graph {
+	t.Helper()
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters, "left", []map[string]any{
+		{"value": "A", "uuid": "u-a", "related": []map[string]any{
+			{"dest-uuid": "u-b", "type": "used-by"},
+		}},
+	})
+	writeCluster(t, clusters, "right", []map[string]any{
+		{"value": "B", "uuid": "u-b", "related": []map[string]any{
+			{"dest-uuid": "u-a", "type": "similar"},
+		}},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	return g
+}
+
+func TestEdgeTypeFilterSeesEveryDeclaredType(t *testing.T) {
+	// Merging keeps one type as the primary; filtering on the other must still
+	// find the link, and must report the type that actually matched.
+	g := twoWayGraph(t)
+	for _, want := range []string{"used-by", "similar"} {
+		found := g.Neighbours("u-a", NeighbourOpts{Depth: 1, EdgeTypes: []string{want}})
+		if len(found) != 1 {
+			t.Fatalf("filtering on %q found %d neighbours, want 1", want, len(found))
+		}
+		if found[0].Via != want {
+			t.Errorf("filtering on %q reported via=%q", want, found[0].Via)
+		}
+	}
+	if got := g.Neighbours("u-a", NeighbourOpts{Depth: 1, EdgeTypes: []string{"nope"}}); len(got) != 0 {
+		t.Errorf("an unmatched type should find nothing, got %+v", got)
+	}
+}
+
+func TestDirectionReflectsWhatTheCorpusDeclared(t *testing.T) {
+	// Both nodes declare the relation, so each must see it as outgoing. Merging
+	// the two declarations into one oriented edge would make this depend on
+	// which cluster file was read first.
+	g := twoWayGraph(t)
+	for _, uuid := range []string{"u-a", "u-b"} {
+		if got := g.Neighbours(uuid, NeighbourOpts{Depth: 1, Direction: Out}); len(got) != 1 {
+			t.Errorf("%s declares the relation outbound, Out found %d", uuid, len(got))
+		}
+		if got := g.Neighbours(uuid, NeighbourOpts{Depth: 1, Direction: In}); len(got) != 1 {
+			t.Errorf("%s is declared upon inbound, In found %d", uuid, len(got))
+		}
+	}
+}
+
 // ---- traversal --------------------------------------------------------------
 
 func TestNeighboursFollowsRelationBackwards(t *testing.T) {

@@ -103,9 +103,29 @@ type Node struct {
 }
 
 // Edge is one typed relation between two nodes.
+//
+// Several declarations can back the same link — the corpus may declare it from
+// both sides, or under more than one relation type. They are merged into a
+// single edge carrying how many declarations support it, because a link
+// asserted once is weaker evidence than one asserted repeatedly.
 type Edge struct {
 	To   *Node
-	Type string
+	Type string // the first relation type declared for this link
+
+	// Types lists every relation type declared between the two nodes.
+	Types []string
+
+	// Confidence counts the declarations backing this link. It is a weaker
+	// signal than the cross-vendor agreement the CTI literature uses: the
+	// corpus is one source, so this counts repetition within it, not
+	// independent corroboration.
+	Confidence int
+
+	// Bridge marks a link whose removal would disconnect the graph. Combined
+	// with a Confidence of 1, it is the profile of an assertion that merges two
+	// otherwise separate clusters on its own — the single most likely place for
+	// a wrong link to have outsized consequences.
+	Bridge bool
 }
 
 // TagNamespace prefixes every canonical MISP galaxy tag.
@@ -152,6 +172,7 @@ type GalaxyInfo struct {
 type Stats struct {
 	Nodes       int    `json:"nodes"`
 	Edges       int    `json:"edges"`
+	Bridges     int    `json:"bridges" jsonschema:"links whose removal would disconnect the graph; those with a confidence of 1 are the weakest joins in the corpus"`
 	Dangling    int    `json:"dangling" jsonschema:"nodes referenced by an edge but never defined as a cluster value"`
 	Revoked     int    `json:"revoked" jsonschema:"nodes the corpus marks as deprecated"`
 	Synthetic   int    `json:"synthetic" jsonschema:"entries the corpus published without a uuid; searchable but never the target of a relation"`

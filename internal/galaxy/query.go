@@ -20,15 +20,17 @@ const (
 
 // Neighbour is one node reached from a starting point.
 type Neighbour struct {
-	UUID     string   `json:"uuid"`
-	Tag      string   `json:"tag,omitempty" jsonschema:"canonical MISP galaxy tag for this entry"`
-	Value    string   `json:"value,omitempty"`
-	Galaxy   string   `json:"galaxy,omitempty"`
-	Depth    int      `json:"depth"`
-	Via      string   `json:"via" jsonschema:"type of the relation on the last hop"`
-	FromUUID string   `json:"from_uuid" jsonschema:"node this one was reached from"`
-	Dangling bool     `json:"dangling,omitempty" jsonschema:"referenced by a relation but not defined in this checkout"`
-	Path     []string `json:"path,omitempty" jsonschema:"uuids from the origin to this node, when requested"`
+	UUID       string   `json:"uuid"`
+	Tag        string   `json:"tag,omitempty" jsonschema:"canonical MISP galaxy tag for this entry"`
+	Value      string   `json:"value,omitempty"`
+	Galaxy     string   `json:"galaxy,omitempty"`
+	Depth      int      `json:"depth"`
+	Via        string   `json:"via" jsonschema:"type of the relation on the last hop"`
+	Confidence int      `json:"confidence" jsonschema:"how many declarations back the last hop; 1 means a single unconfirmed assertion"`
+	Bridge     bool     `json:"bridge,omitempty" jsonschema:"the last hop is the only link joining these two parts of the graph. A bridge with confidence 1 rests on one unverified assertion and should be treated as provisional"`
+	FromUUID   string   `json:"from_uuid" jsonschema:"node this one was reached from"`
+	Dangling   bool     `json:"dangling,omitempty" jsonschema:"referenced by a relation but not defined in this checkout"`
+	Path       []string `json:"path,omitempty" jsonschema:"uuids from the origin to this node, when requested"`
 }
 
 // NeighbourOpts tunes a traversal.
@@ -83,7 +85,8 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 			continue
 		}
 		for _, e := range edgesOf(cur.node, opt.Direction) {
-			if !keep(e.Type) || visited[e.To] {
+			ok, via := e.matches(keep)
+			if !ok || visited[e.To] {
 				continue
 			}
 			visited[e.To] = true
@@ -99,7 +102,8 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 			}
 			n := Neighbour{
 				UUID: e.To.UUID, Tag: e.To.Tag(), Value: e.To.Value, Galaxy: e.To.Galaxy,
-				Depth: cur.depth + 1, Via: e.Type,
+				Depth: cur.depth + 1, Via: via,
+				Confidence: e.Confidence, Bridge: e.Bridge,
 				FromUUID: cur.node.UUID, Dangling: e.To.Dangling,
 			}
 			if opt.WithPaths {
@@ -123,11 +127,13 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 
 // PathHop is one step along a discovered path.
 type PathHop struct {
-	UUID   string `json:"uuid"`
-	Tag    string `json:"tag,omitempty" jsonschema:"canonical MISP galaxy tag for this entry"`
-	Value  string `json:"value,omitempty"`
-	Galaxy string `json:"galaxy,omitempty"`
-	Via    string `json:"via,omitempty" jsonschema:"relation type taken to reach this node"`
+	UUID       string `json:"uuid"`
+	Tag        string `json:"tag,omitempty" jsonschema:"canonical MISP galaxy tag for this entry"`
+	Value      string `json:"value,omitempty"`
+	Galaxy     string `json:"galaxy,omitempty"`
+	Via        string `json:"via,omitempty" jsonschema:"relation type taken to reach this node"`
+	Confidence int    `json:"confidence,omitempty" jsonschema:"declarations backing the hop that reached this node"`
+	Bridge     bool   `json:"bridge,omitempty" jsonschema:"this hop is the only link between the two sides; the path depends entirely on it"`
 }
 
 // ShortestPath finds a shortest route between two nodes using a bidirectional
@@ -162,13 +168,14 @@ func (g *Graph) ShortestPath(fromUUID, toUUID string, maxDepth int, edgeTypes []
 		var next []*Node
 		for _, n := range front {
 			for _, e := range edgesOf(n, Both) {
-				if !keep(e.Type) {
+				ok, via := e.matches(keep)
+				if !ok {
 					continue
 				}
 				if _, been := seen[e.To]; been {
 					continue
 				}
-				seen[e.To] = link{prev: n, via: e.Type}
+				seen[e.To] = link{prev: n, via: via, confidence: e.Confidence, bridge: e.Bridge}
 				if _, met := other[e.To]; met {
 					return next, e.To
 				}
@@ -196,8 +203,10 @@ func (g *Graph) ShortestPath(fromUUID, toUUID string, maxDepth int, edgeTypes []
 
 // link records how a node was reached during a bidirectional search.
 type link struct {
-	prev *Node
-	via  string
+	prev       *Node
+	via        string
+	confidence int
+	bridge     bool
 }
 
 // stitch rebuilds the full route from the meeting node outward to both ends.
@@ -205,25 +214,34 @@ func stitch(meet *Node, fwd, bwd map[*Node]link) []PathHop {
 	var head []PathHop
 	for n := meet; n != nil; {
 		l := fwd[n]
-		head = append(head, PathHop{UUID: n.UUID, Tag: n.Tag(), Value: n.Value, Galaxy: n.Galaxy, Via: l.via})
+		head = append(head, PathHop{
+			UUID: n.UUID, Tag: n.Tag(), Value: n.Value, Galaxy: n.Galaxy,
+			Via: l.via, Confidence: l.confidence, Bridge: l.bridge,
+		})
 		n = l.prev
 	}
-	// head currently runs meet → from; reverse it.
-	for i, j := 0, len(head)-1; i < j; i, j = i+1, j-1 {
-		head[i], head[j] = head[j], head[i]
-	}
-	// The first hop has no incoming relation.
+	head = reverseHops(head)
 	if len(head) > 0 {
-		head[0].Via = ""
+		head[0].Via, head[0].Confidence, head[0].Bridge = "", 0, false
 	}
 
 	n := bwd[meet].prev
 	for n != nil {
 		l := bwd[n]
-		head = append(head, PathHop{UUID: n.UUID, Tag: n.Tag(), Value: n.Value, Galaxy: n.Galaxy, Via: bwd[n].via})
+		head = append(head, PathHop{
+			UUID: n.UUID, Tag: n.Tag(), Value: n.Value, Galaxy: n.Galaxy,
+			Via: l.via, Confidence: l.confidence, Bridge: l.bridge,
+		})
 		n = l.prev
 	}
 	return head
+}
+
+func reverseHops(h []PathHop) []PathHop {
+	for i, j := 0, len(h)-1; i < j; i, j = i+1, j-1 {
+		h[i], h[j] = h[j], h[i]
+	}
+	return h
 }
 
 func edgesOf(n *Node, d Direction) []Edge {
@@ -244,16 +262,42 @@ func edgesOf(n *Node, d Direction) []Edge {
 	}
 }
 
-func edgeFilter(types []string) func(string) bool {
+func edgeFilter(types []string) map[string]struct{} {
 	if len(types) == 0 {
-		return func(string) bool { return true }
+		return nil
 	}
 	set := make(map[string]struct{}, len(types))
 	for _, t := range types {
-		set[strings.ToLower(strings.TrimSpace(t))] = struct{}{}
+		if t = strings.ToLower(strings.TrimSpace(t)); t != "" {
+			set[t] = struct{}{}
+		}
 	}
-	return func(t string) bool {
-		_, ok := set[strings.ToLower(t)]
-		return ok
+	if len(set) == 0 {
+		return nil
 	}
+	return set
+}
+
+// matches reports whether an edge passes a relation-type filter, and which
+// type satisfied it.
+//
+// Every declared type is checked, not just the first: links are merged, so a
+// relation declared used-by from one side and similar from the other carries
+// both, and filtering on either must find it. Testing only Type would silently
+// drop links the caller explicitly asked for.
+func (e Edge) matches(keep map[string]struct{}) (bool, string) {
+	if keep == nil {
+		return true, e.Type
+	}
+	if _, ok := keep[strings.ToLower(e.Type)]; ok {
+		return true, e.Type
+	}
+	for _, t := range e.Types {
+		if _, ok := keep[strings.ToLower(t)]; ok {
+			// Report the type that matched rather than the first declared: a
+			// caller filtering on "similar" should see "similar" as the hop.
+			return true, t
+		}
+	}
+	return false, ""
 }
