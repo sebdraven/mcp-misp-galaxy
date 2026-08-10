@@ -23,6 +23,7 @@ const (
 // caller (or the analyst) picks; this only orders the options and says why.
 type Candidate struct {
 	UUID      string   `json:"uuid"`
+	Tag       string   `json:"tag,omitempty" jsonschema:"canonical MISP galaxy tag, e.g. misp-galaxy:threat-actor=\"APT28\" — this is what gets attached to a MISP event"`
 	Value     string   `json:"value"`
 	Galaxy    string   `json:"galaxy"`
 	Reason    string   `json:"reason" jsonschema:"why this matched: value, synonym, value_prefix, synonym_prefix or substring"`

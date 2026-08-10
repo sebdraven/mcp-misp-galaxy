@@ -175,6 +175,7 @@ func (s *Service) Resolve(q string, galaxies []string, limit int, group bool) (R
 // counted by type.
 type NodeDetail struct {
 	UUID        string         `json:"uuid"`
+	Tag         string         `json:"tag,omitempty" jsonschema:"canonical MISP galaxy tag, e.g. misp-galaxy:threat-actor=\"APT28\" — this is what gets attached to a MISP event"`
 	Value       string         `json:"value"`
 	Galaxy      string         `json:"galaxy"`
 	Description string         `json:"description,omitempty"`

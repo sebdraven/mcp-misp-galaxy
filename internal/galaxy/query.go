@@ -21,6 +21,7 @@ const (
 // Neighbour is one node reached from a starting point.
 type Neighbour struct {
 	UUID     string   `json:"uuid"`
+	Tag      string   `json:"tag,omitempty" jsonschema:"canonical MISP galaxy tag for this entry"`
 	Value    string   `json:"value,omitempty"`
 	Galaxy   string   `json:"galaxy,omitempty"`
 	Depth    int      `json:"depth"`
@@ -123,6 +124,7 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 // PathHop is one step along a discovered path.
 type PathHop struct {
 	UUID   string `json:"uuid"`
+	Tag    string `json:"tag,omitempty" jsonschema:"canonical MISP galaxy tag for this entry"`
 	Value  string `json:"value,omitempty"`
 	Galaxy string `json:"galaxy,omitempty"`
 	Via    string `json:"via,omitempty" jsonschema:"relation type taken to reach this node"`
