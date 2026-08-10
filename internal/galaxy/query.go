@@ -116,11 +116,16 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 			if opt.Galaxies != nil && inScope != nil && !inScope[strings.ToLower(e.To.Galaxy)] {
 				continue
 			}
+			if opt.MaxGroupCount > 0 && e.To.GroupCount > opt.MaxGroupCount {
+				continue
+			}
 			n := Neighbour{
 				UUID: e.To.UUID, Tag: e.To.Tag(), Value: e.To.Value, Galaxy: e.To.Galaxy,
 				Depth: cur.depth + 1, Via: via,
 				Confidence: e.Confidence, Bridge: e.Bridge,
-				FromUUID: cur.node.UUID, Dangling: e.To.Dangling,
+				GroupCount: e.To.GroupCount,
+				Generic:    e.To.GroupCount >= GenericThreshold,
+				FromUUID:   cur.node.UUID, Dangling: e.To.Dangling,
 			}
 			if opt.WithPaths {
 				n.Path = path
@@ -135,6 +140,11 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Depth != out[j].Depth {
 			return out[i].Depth < out[j].Depth
+		}
+		// Specific before generic: what distinguishes this entry should be read
+		// first, and what every group shares should sink to the bottom.
+		if out[i].GroupCount != out[j].GroupCount {
+			return out[i].GroupCount < out[j].GroupCount
 		}
 		return out[i].Value < out[j].Value
 	})
