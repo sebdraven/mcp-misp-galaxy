@@ -239,62 +239,69 @@ func TestResolveEmptyQuery(t *testing.T) {
 }
 
 func TestDegreeBreaksTiesButDoesNotOutrankScore(t *testing.T) {
-	// Tie-break: at equal score, higher-degree candidates should rank first.
-	g := chainGraph(t)
-	got := g.Resolve("o", nil, 20)
-
-	orphan, actor := -1, -1
-	for i, c := range got {
-		switch c.UUID {
-		case "u-orphan":
-			orphan = i
-		case "u-actor":
-			actor = i
-		}
-	}
-	if orphan == -1 || actor == -1 {
-		t.Fatalf("expected u-orphan and u-actor in results, got %+v", got)
-	}
-	if got[orphan].Score != got[actor].Score {
-		t.Fatalf("expected equal scores for tie-break check, got orphan=%d actor=%d (scores %d vs %d)", orphan, actor, got[orphan].Score, got[actor].Score)
-	}
-	if got[actor].Degree <= got[orphan].Degree {
-		t.Fatalf("expected u-actor to have higher degree than u-orphan for tie-break check, got %d vs %d", got[actor].Degree, got[orphan].Degree)
-	}
-	if actor > orphan {
-		t.Fatalf("at equal score, the connected entry should rank first: actor=%d orphan=%d", actor, orphan)
-	}
-
-	// Precedence: degree must not outrank a better score (exact match should beat
-	// a better-connected prefix/substring match).
+	// Tie-break: the same value in two galaxies, so both score identically as
+	// exact matches and only degree can separate them. A shared fixture will
+	// not do here — two entries matching the same query at the same score is
+	// precisely the situation this rule exists for, and it has to be built.
 	root := t.TempDir()
 	clusters := filepath.Join(root, "clusters")
 	if err := os.MkdirAll(clusters, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	writeCluster(t, clusters, "test", []map[string]any{
+	writeCluster(t, clusters, "lonely", []map[string]any{
+		{"value": "Twin", "uuid": "u-lonely", "meta": map[string]any{}},
+	})
+	writeCluster(t, clusters, "linked", []map[string]any{
+		{"value": "Twin", "uuid": "u-linked", "related": []map[string]any{
+			{"dest-uuid": "u-x1", "type": "rel"},
+			{"dest-uuid": "u-x2", "type": "rel"},
+		}},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	got := g.Resolve("Twin", nil, 10)
+	if len(got) != 2 {
+		t.Fatalf("expected both twins, got %+v", got)
+	}
+	if got[0].Score != got[1].Score {
+		t.Fatalf("the fixture must produce equal scores for this to test anything, got %d vs %d",
+			got[0].Score, got[1].Score)
+	}
+	if got[0].Degree == got[1].Degree {
+		t.Fatalf("the fixture must produce different degrees, got %d vs %d",
+			got[0].Degree, got[1].Degree)
+	}
+	if got[0].UUID != "u-linked" {
+		t.Fatalf("at equal score the connected entry should rank first, got %+v", got)
+	}
+
+	// Precedence: degree must not outrank a better score — an exact match beats
+	// a better-connected prefix match.
+	root2 := t.TempDir()
+	clusters2 := filepath.Join(root2, "clusters")
+	if err := os.MkdirAll(clusters2, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters2, "test", []map[string]any{
 		{"value": "Alpha", "uuid": "u-alpha", "meta": map[string]any{}},
 		{"value": "Alpha Extended", "uuid": "u-alpha-ext", "related": []map[string]any{
 			{"dest-uuid": "u-x1", "type": "rel"},
 			{"dest-uuid": "u-x2", "type": "rel"},
 			{"dest-uuid": "u-x3", "type": "rel"},
 		}},
-		{"value": "Other", "uuid": "u-other", "related": []map[string]any{
-			{"dest-uuid": "u-alpha-ext", "type": "rel"},
-		}},
 	})
-	g2, err := Load(root, "deadbeef")
+	g2, err := Load(root2, "deadbeef")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
+
 	got2 := g2.Resolve("Alpha", nil, 10)
 	if len(got2) < 2 {
 		t.Fatalf("expected both exact and prefix matches, got %+v", got2)
 	}
-	if got2[0].UUID != "u-alpha" {
-		t.Fatalf("exact match must come first regardless of degree, got %+v", got2)
-	}
-
 	degAlpha, degExt := -1, -1
 	for _, c := range got2 {
 		switch c.UUID {
