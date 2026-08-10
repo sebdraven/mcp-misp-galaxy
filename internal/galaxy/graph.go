@@ -174,10 +174,7 @@ func Load(root, sourceRef string, opts ...LoadOption) (*Graph, error) {
 			}
 			// Canonical unordered key: a link declared A→B and B→A is one
 			// link asserted twice, not two links.
-			key := [2]string{p.from, rel.DestUUID}
-			if key[0] > key[1] {
-				key[0], key[1] = key[1], key[0]
-			}
+			key := pairKey(p.from, rel.DestUUID)
 			info := links[key]
 			if info == nil {
 				info = &linkInfo{firstType: rel.Type}
