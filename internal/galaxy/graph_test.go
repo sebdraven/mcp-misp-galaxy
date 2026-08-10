@@ -402,15 +402,25 @@ func TestConfidenceCountsDeclarations(t *testing.T) {
 		t.Errorf("a link declared from both sides is one edge, got %d", got)
 	}
 	a, _ := g.Node("u-a")
-	edges := append(append([]Edge{}, a.Out...), a.In...)
-	if len(edges) != 1 {
-		t.Fatalf("expected a single merged edge, got %d", len(edges))
+	// Two adjacency entries, not one: each side declared the relation, so each
+	// sees it outbound. They describe the same link and carry the same merged
+	// confidence and types.
+	if len(a.Out) != 1 || len(a.In) != 1 {
+		t.Fatalf("expected one outgoing and one incoming entry, got %d/%d", len(a.Out), len(a.In))
 	}
-	if edges[0].Confidence != 2 {
-		t.Errorf("confidence = %d, want 2", edges[0].Confidence)
+	for _, e := range append(append([]Edge{}, a.Out...), a.In...) {
+		if e.Confidence != 2 {
+			t.Errorf("confidence = %d, want 2", e.Confidence)
+		}
+		if len(e.Types) != 2 {
+			t.Errorf("both relation types should be kept, got %+v", e.Types)
+		}
 	}
-	if len(edges[0].Types) != 2 {
-		t.Errorf("both relation types should be kept, got %+v", edges[0].Types)
+
+	// And a one-sided declaration stays at confidence 1 — otherwise the field
+	// would say nothing.
+	if got := g.Stats().Bridges; got != 1 {
+		t.Errorf("the single link joins the whole graph, bridges = %d, want 1", got)
 	}
 }
 
