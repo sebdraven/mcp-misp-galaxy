@@ -372,6 +372,102 @@ func TestTagEscapesQuotes(t *testing.T) {
 	}
 }
 
+// ---- confidence and bridges --------------------------------------------------
+
+func TestConfidenceCountsDeclarations(t *testing.T) {
+	// Two galaxies each declaring the same link: one link, asserted twice.
+	// A relation stated from both sides is better supported than one stated
+	// from a single side, and that is what confidence records.
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters, "left", []map[string]any{
+		{"value": "A", "uuid": "u-a", "related": []map[string]any{
+			{"dest-uuid": "u-b", "type": "similar"},
+		}},
+	})
+	writeCluster(t, clusters, "right", []map[string]any{
+		{"value": "B", "uuid": "u-b", "related": []map[string]any{
+			{"dest-uuid": "u-a", "type": "used-by"},
+		}},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got := g.Stats().Edges; got != 1 {
+		t.Errorf("a link declared from both sides is one edge, got %d", got)
+	}
+	a, _ := g.Node("u-a")
+	edges := append(append([]Edge{}, a.Out...), a.In...)
+	if len(edges) != 1 {
+		t.Fatalf("expected a single merged edge, got %d", len(edges))
+	}
+	if edges[0].Confidence != 2 {
+		t.Errorf("confidence = %d, want 2", edges[0].Confidence)
+	}
+	if len(edges[0].Types) != 2 {
+		t.Errorf("both relation types should be kept, got %+v", edges[0].Types)
+	}
+}
+
+func TestBridgeDetection(t *testing.T) {
+	// A triangle joined to an isolated node by one link. Only that link is a
+	// bridge: cutting any triangle edge leaves the graph connected.
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters, "ring", []map[string]any{
+		{"value": "A", "uuid": "r-a", "related": []map[string]any{
+			{"dest-uuid": "r-b", "type": "rel"},
+		}},
+		{"value": "B", "uuid": "r-b", "related": []map[string]any{
+			{"dest-uuid": "r-c", "type": "rel"},
+		}},
+		{"value": "C", "uuid": "r-c", "related": []map[string]any{
+			{"dest-uuid": "r-a", "type": "rel"},
+			{"dest-uuid": "r-far", "type": "weak"},
+		}},
+		{"value": "Far", "uuid": "r-far"},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got := g.Stats().Bridges; got != 1 {
+		t.Fatalf("expected exactly one bridge, got %d", got)
+	}
+	c, _ := g.Node("r-c")
+	for _, e := range append(append([]Edge{}, c.Out...), c.In...) {
+		wantBridge := e.To.UUID == "r-far"
+		if e.Bridge != wantBridge {
+			t.Errorf("edge to %s: bridge = %v, want %v", e.To.UUID, e.Bridge, wantBridge)
+		}
+	}
+}
+
+func TestNeighboursCarryConfidenceAndBridge(t *testing.T) {
+	g := chainGraph(t)
+	found := g.Neighbours("u-nasty", NeighbourOpts{Depth: 2})
+	for _, n := range found {
+		if n.Confidence < 1 {
+			t.Errorf("neighbour %s has confidence %d", n.UUID, n.Confidence)
+		}
+	}
+	// The chain fixture is a path, so every hop is a bridge by construction.
+	for _, n := range found {
+		if !n.Bridge {
+			t.Errorf("every link in a chain is a bridge, %s is not flagged", n.UUID)
+		}
+	}
+}
+
 // ---- traversal --------------------------------------------------------------
 
 func TestNeighboursFollowsRelationBackwards(t *testing.T) {
