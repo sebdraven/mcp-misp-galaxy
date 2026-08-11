@@ -94,6 +94,13 @@ func neighbourRank(n Neighbour) int {
 
 // Neighbours walks outward from a node, breadth first, and returns what it
 // reached. Nodes are reported at the shallowest depth they were found at.
+//
+// The whole neighbourhood is collected, ranked, and only then cut to Limit.
+// Stopping the walk at Limit instead would let arrival order decide what the
+// caller sees, and the ranking could only reorder whichever entries happened
+// to be reached first — so a walk from a malware could miss the actor using
+// it entirely while appearing to show "the most relevant" results. Hubs run to
+// a few hundred neighbours, so holding them all before truncating is cheap.
 func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 	start, ok := g.nodes[uuid]
 	if !ok {
@@ -120,7 +127,7 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 	queue := []entry{{node: start, depth: 0, path: []string{start.UUID}}}
 	var out []Neighbour
 
-	for len(queue) > 0 && len(out) < opt.Limit {
+	for len(queue) > 0 {
 		cur := queue[0]
 		queue = queue[1:]
 		if cur.depth == opt.Depth {
@@ -169,9 +176,6 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 				n.Path = path
 			}
 			out = append(out, n)
-			if len(out) >= opt.Limit {
-				break
-			}
 		}
 	}
 
@@ -192,6 +196,10 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 		}
 		return out[i].Value < out[j].Value
 	})
+
+	if len(out) > opt.Limit {
+		out = out[:opt.Limit]
+	}
 	return out
 }
 
