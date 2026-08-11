@@ -1,10 +1,11 @@
 // Package mcptools is the MCP façade over the same service the REST API uses.
 //
 // Tool descriptions carry more weight here than in a REST API: they are the
-// only thing a model reads before choosing. Two things are stated explicitly
+// only thing a model reads before choosing. Three things are stated explicitly
 // because getting them wrong produces confident misattribution — that
-// gx_resolve returns ranked candidates rather than an answer, and that a
-// revoked entry is still returned rather than hidden.
+// gx_resolve returns ranked candidates rather than an answer, that a revoked
+// entry is still returned rather than hidden, and that a high group_count
+// means an entry distinguishes nobody.
 package mcptools
 
 import (
@@ -60,6 +61,13 @@ func Register(s *mcp.Server, svc *service.Service) {
 		Name:        "gx_galaxies",
 		Description: "List the galaxies in the loaded corpus with their entry counts. Useful to pick a value for the 'galaxy' filter on gx_resolve and gx_neighbors.",
 	}, r.galaxies)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "gx_generic",
+		Description: "List the entries used by the most threat actors — the ones with the least attribution value. " +
+			"Read this before drawing conclusions from a list of relations: a technique or tool shared by dozens of actors says nothing about who was behind an intrusion, " +
+			"and treating it as evidence is a known route to misattribution. Pass a galaxy to scope it, e.g. mitre-attack-pattern for techniques or tool for shared tooling.",
+	}, r.generic)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "gx_status",
