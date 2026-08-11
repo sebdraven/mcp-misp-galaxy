@@ -1,6 +1,7 @@
 package galaxy
 
 import (
+	"regexp"
 	"sort"
 	"strings"
 	"unicode"
@@ -36,6 +37,48 @@ type Candidate struct {
 	Synonyms   []string `json:"synonyms,omitempty"`
 }
 
+// Normalisation selects how names are folded before matching.
+type Normalisation string
+
+const (
+	// Standard folds case and punctuation only. APT28, APT-28 and APT 28 match;
+	// "LightSpy - S1185" and "LightSpy" do not.
+	Standard Normalisation = "standard"
+
+	// Aggressive additionally strips the decorations vendors and taxonomies
+	// attach to a name: MITRE identifier suffixes, platform prefixes,
+	// collective suffixes, a leading "the", and a trailing vendor in
+	// parentheses.
+	//
+	// It matches more, and some of what it matches is wrong: dropping "group"
+	// merges an actor with a tool of the same stem, and dropping platform
+	// prefixes merges win.foo with apk.foo, which may be unrelated families.
+	// Offered alongside Standard rather than replacing it so the two can be
+	// compared on the same query.
+	Aggressive Normalisation = "aggressive"
+)
+
+// collectiveSuffixes are the words taxonomies append to an actor name without
+// changing who it refers to: "Callisto" and "Callisto Group" are one entity.
+var collectiveSuffixes = []string{
+	"group", "groups", "gang", "team", "crew", "apt",
+	"cyberespionage", "cyberespionagegroup", "framework", "lair",
+}
+
+// platformPrefixes are the Malpedia-style platform qualifiers. Stripping them
+// is what lets win.icefog match icefog.
+var platformPrefixes = []string{
+	"win", "elf", "apk", "osx", "py", "js", "vbs", "jar", "symbian", "ios",
+}
+
+// mitreSuffix matches the identifier MITRE appends to display names, as in
+// "APT28 - G0096" or "LightSpy - S1185".
+var mitreSuffix = regexp.MustCompile(`\s*-\s*[GSTMC]\d{3,4}(\.\d{3})?\s*$`)
+
+// vendorSuffix matches a trailing vendor in parentheses: "Earth Preta
+// (Trendmicro)", "Hive 0081 (IBM)".
+var vendorSuffix = regexp.MustCompile(`\s*\([^)]*\)\s*$`)
+
 // normalise folds the spelling variants that plague actor names: case, spacing
 // and the hyphen/space/nothing alternation (APT28 / APT-28 / APT 28 all fold
 // to the same key). Applied at index time, not at query time.
@@ -53,27 +96,73 @@ func normalise(s string) string {
 	return b.String()
 }
 
+// normaliseAggressive strips taxonomy decoration before folding.
+//
+// Order matters: the identifier and vendor suffixes are matched against the
+// original string, where the separators they rely on still exist. Folding
+// first would erase the very spaces and parentheses that make them
+// recognisable.
+func normaliseAggressive(s string) string {
+	s = mitreSuffix.ReplaceAllString(s, "")
+	s = vendorSuffix.ReplaceAllString(s, "")
+	s = strings.TrimSpace(s)
+
+	// A leading "the", on the original so the word boundary is still visible.
+	if lower := strings.ToLower(s); strings.HasPrefix(lower, "the ") {
+		s = s[4:]
+	}
+
+	key := normalise(s)
+
+	// Platform prefix, only when something is left after it: "win" alone is a
+	// name, "win.icefog" is a qualified one.
+	for _, p := range platformPrefixes {
+		if len(key) > len(p) && strings.HasPrefix(key, p) {
+			if rest := key[len(p):]; rest != "" {
+				key = rest
+				break
+			}
+		}
+	}
+
+	// Collective suffix, same guard: "group" on its own stays "group".
+	for _, suffix := range collectiveSuffixes {
+		if len(key) > len(suffix) && strings.HasSuffix(key, suffix) {
+			key = key[:len(key)-len(suffix)]
+			break
+		}
+	}
+	return key
+}
+
 // buildIndex maps every normalised name and synonym to the nodes carrying it.
 // A key holding several nodes is the normal case, not an anomaly.
+//
+// Two indexes are built, one per normalisation. Keeping both lets a caller run
+// the same query under each and see what the aggressive form gains and what it
+// wrongly merges — a claim worth checking rather than trusting. The second map
+// costs a few megabytes against a corpus already holding 55,000 nodes.
 func (g *Graph) buildIndex() {
-	add := func(key string, n *Node) {
+	add := func(idx map[string][]*Node, key string, n *Node) {
 		if key == "" {
 			return
 		}
-		for _, existing := range g.index[key] {
+		for _, existing := range idx[key] {
 			if existing == n {
 				return
 			}
 		}
-		g.index[key] = append(g.index[key], n)
+		idx[key] = append(idx[key], n)
 	}
 	for _, n := range g.nodes {
 		if n.Dangling {
 			continue
 		}
-		add(normalise(n.Value), n)
+		add(g.index, normalise(n.Value), n)
+		add(g.indexAggressive, normaliseAggressive(n.Value), n)
 		for _, syn := range n.Synonyms {
-			add(normalise(syn), n)
+			add(g.index, normalise(syn), n)
+			add(g.indexAggressive, normaliseAggressive(syn), n)
 		}
 	}
 }
@@ -107,7 +196,19 @@ func scopeSet(galaxies []string) map[string]bool {
 // Passing no galaxies searches everything, which is occasionally what you want
 // and never what you want by default.
 func (g *Graph) Resolve(q string, galaxies []string, limit int) []Candidate {
-	key := normalise(q)
+	return g.ResolveWith(q, galaxies, limit, Standard)
+}
+
+// ResolveWith is Resolve under an explicit normalisation.
+func (g *Graph) ResolveWith(q string, galaxies []string, limit int, mode Normalisation) []Candidate {
+	fold := normalise
+	index := g.index
+	if mode == Aggressive {
+		fold = normaliseAggressive
+		index = g.indexAggressive
+	}
+
+	key := fold(q)
 	if key == "" {
 		return nil
 	}
@@ -148,14 +249,14 @@ func (g *Graph) Resolve(q string, galaxies []string, limit int) []Candidate {
 	}
 
 	// Exact bucket first — cheap map hit.
-	for _, n := range g.index[key] {
-		if normalise(n.Value) == key {
+	for _, n := range index[key] {
+		if fold(n.Value) == key {
 			consider(n, MatchValue, n.Value, 100)
 			continue
 		}
 		matched := key
 		for _, syn := range n.Synonyms {
-			if normalise(syn) == key {
+			if fold(syn) == key {
 				matched = syn
 				break
 			}
@@ -166,7 +267,7 @@ func (g *Graph) Resolve(q string, galaxies []string, limit int) []Candidate {
 	// Then a scan for prefix and substring. Linear over the key set, which is
 	// tens of thousands of entries — fast enough that a trie is not worth the
 	// extra structure until measurement says otherwise.
-	for indexed, nodes := range g.index {
+	for indexed, nodes := range index {
 		if indexed == key {
 			continue
 		}
@@ -182,14 +283,14 @@ func (g *Graph) Resolve(q string, galaxies []string, limit int) []Candidate {
 		}
 		for _, n := range nodes {
 			r, score, matched := reason, base, n.Value
-			if normalise(n.Value) != indexed {
+			if fold(n.Value) != indexed {
 				// matched via a synonym rather than the canonical name
 				if reason == MatchValuePrefix {
 					r = MatchSynonymPre
 				}
 				score -= 5
 				for _, syn := range n.Synonyms {
-					if normalise(syn) == indexed {
+					if fold(syn) == indexed {
 						matched = syn
 						break
 					}

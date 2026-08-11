@@ -15,12 +15,13 @@ import (
 // Graph is an immutable view of the MISP galaxy corpus. Every method is safe
 // for concurrent use because nothing mutates after Load returns.
 type Graph struct {
-	nodes      map[string]*Node // by UUID
-	index      map[string][]*Node
-	byGalaxy   map[string][]*Node
-	galaxies   map[string]GalaxyInfo
-	thresholds map[string]int // per-galaxy generic cut-off
-	stats      Stats
+	nodes           map[string]*Node // by UUID
+	index           map[string][]*Node
+	indexAggressive map[string][]*Node
+	byGalaxy        map[string][]*Node
+	galaxies        map[string]GalaxyInfo
+	thresholds      map[string]int // per-galaxy generic cut-off
+	stats           Stats
 }
 
 // Holder carries the live graph and lets a reload swap it without locking
@@ -75,10 +76,11 @@ func Load(root, sourceRef string, opts ...LoadOption) (*Graph, error) {
 	}
 
 	g := &Graph{
-		nodes:    make(map[string]*Node, 1<<16),
-		index:    make(map[string][]*Node, 1<<16),
-		byGalaxy: make(map[string][]*Node),
-		galaxies: make(map[string]GalaxyInfo),
+		nodes:           make(map[string]*Node, 1<<16),
+		index:           make(map[string][]*Node, 1<<16),
+		indexAggressive: make(map[string][]*Node, 1<<16),
+		byGalaxy:        make(map[string][]*Node),
+		galaxies:        make(map[string]GalaxyInfo),
 	}
 
 	files, err := jsonFiles(clusterDir)
