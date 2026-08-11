@@ -149,23 +149,31 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 		if out[i].Depth != out[j].Depth {
 			return out[i].Depth < out[j].Depth
 		}
-		// Attributed entries before unattributed ones. A count of 0 is not the
-		// most specific case, it is the *uninformative* one: nobody is recorded
-		// as using it, which supports no conclusion at all. Sorting purely
-		// ascending would put those first and dress a gap in the data as the
-		// strongest signal on the page — which is precisely how
-		// under-reporting turns into false attribution.
-		zi, zj := out[i].GroupCount == 0, out[j].GroupCount == 0
-		if zi != zj {
-			return zj
+		// Attributed entries before unattributed ones — but only for entries
+		// that *could* carry an attribution. A count of 0 on a technique or a
+		// malware means nobody is recorded as using it: absence of data, not
+		// exclusivity, and ranking it first would dress a gap as the strongest
+		// signal on the page. A count of 0 on an actor means nothing at all,
+		// since actors are never counted against themselves — demoting those
+		// would bury the very neighbours a walk from a malware is looking for.
+		ui, uj := unattributed(out[i]), unattributed(out[j])
+		if ui != uj {
+			return uj
 		}
-		// Among attributed entries, fewer actors means more discriminating.
+		// Among entries that carry a count, fewer actors means more
+		// discriminating.
 		if out[i].GroupCount != out[j].GroupCount {
 			return out[i].GroupCount < out[j].GroupCount
 		}
 		return out[i].Value < out[j].Value
 	})
 	return out
+}
+
+// unattributed reports an entry that should have an actor linked to it and has
+// none. Actor entries are excluded: their count is 0 by construction.
+func unattributed(n Neighbour) bool {
+	return n.GroupCount == 0 && !ActorGalaxies[strings.ToLower(n.Galaxy)]
 }
 
 // PathHop is one step along a discovered path.
