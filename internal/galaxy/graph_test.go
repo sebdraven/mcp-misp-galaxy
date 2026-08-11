@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -597,6 +598,71 @@ func TestSpecificNeighboursRankBeforeGeneric(t *testing.T) {
 	}
 	if found[0].UUID != "t-rare" {
 		t.Errorf("the exclusive technique should come first, got %+v", found)
+	}
+}
+
+func TestUnattributedRanksAfterAttributed(t *testing.T) {
+	// An entry no actor is linked to is not the most specific one, it is the
+	// uninformative one. Ranking it first would present a gap in the data as
+	// the strongest signal on the page — the exact mechanism by which
+	// under-reporting turns into false attribution.
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters, "threat-actor", []map[string]any{
+		{"value": "Actor One", "uuid": "a-1", "related": []map[string]any{
+			{"dest-uuid": "t-exclusive", "type": "uses"},
+			{"dest-uuid": "t-orphan", "type": "uses"},
+			{"dest-uuid": "t-shared", "type": "uses"},
+		}},
+		{"value": "Actor Two", "uuid": "a-2", "related": []map[string]any{
+			{"dest-uuid": "t-shared", "type": "uses"},
+		}},
+	})
+	// t-orphan is reached from the actor but the loader records no actor on it
+	// because the edge is declared the other way and it sits in a galaxy that
+	// is not an actor galaxy; what matters here is that its count is 0.
+	writeCluster(t, clusters, "mitre-attack-pattern", []map[string]any{
+		{"value": "Exclusive", "uuid": "t-exclusive"},
+		{"value": "Shared", "uuid": "t-shared"},
+		{"value": "Orphan", "uuid": "t-orphan"},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	found := g.Neighbours("a-1", NeighbourOpts{Depth: 1})
+	var order []string
+	for _, n := range found {
+		order = append(order, n.UUID)
+	}
+	if len(order) != 3 {
+		t.Fatalf("expected three neighbours, got %v", order)
+	}
+	// Exclusive (1 actor) first, shared (2 actors) next, and only then the
+	// entry nobody is linked to.
+	if order[0] != "t-exclusive" || order[1] != "t-shared" {
+		t.Errorf("attributed entries must lead, got %v", order)
+	}
+}
+
+func TestZeroGroupCountIsReportedNotOmitted(t *testing.T) {
+	// A missing field and a count of zero read the same way in JSON, and they
+	// mean opposite things here. The field must always be emitted.
+	g := chainGraph(t)
+	found := g.Neighbours("u-nasty", NeighbourOpts{Depth: 1})
+	if len(found) == 0 {
+		t.Fatal("expected at least one neighbour")
+	}
+	raw, err := json.Marshal(found[0])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"group_count"`) {
+		t.Errorf("group_count must be present even at zero, got %s", raw)
 	}
 }
 
