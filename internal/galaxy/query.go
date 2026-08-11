@@ -57,7 +57,36 @@ type NeighbourOpts struct {
 	Limit      int  // max nodes returned, default 200
 	WithPaths  bool // record the route to each node
 	SkipGhosts bool // drop dangling nodes from the result
+
+	// MaxVisited caps how many nodes the walk may expand, independently of how
+	// many it returns. Default MaxVisitedDefault.
+	//
+	// Ranking before truncation means Limit no longer bounds the work done, so
+	// something else has to: at depth 3 from a hub, an unbounded walk reaches a
+	// large share of the corpus regardless of how few results were asked for.
+	MaxVisited int
 }
+
+// MaxVisitedDefault bounds traversal work when the caller sets no cap.
+//
+// Sized to cover any realistic neighbourhood — the busiest entries in the
+// corpus have a few hundred relations, and two hops from one stay well under
+// this — while stopping a depth-4 walk from touching the whole graph.
+const MaxVisitedDefault = 20000
+
+// MaxDepth caps how far a traversal may walk, whatever the caller asks for.
+//
+// Beyond four hops the result stops being an answer: on a graph with hubs this
+// dense, almost everything reaches almost everything, and a path that long
+// supports no claim about either end. The cap is as much about the meaning of
+// the output as about the cost of producing it.
+const MaxDepth = 4
+
+// MaxPathDepth caps a path search. Higher than MaxDepth because a
+// bidirectional search expands from both ends, so six hops costs about what
+// three do from one side — and because "what connects these two" is a question
+// worth a few more hops than "what is near this one".
+const MaxPathDepth = 6
 
 // GenericFallbackThreshold applies to galaxies with too few attributed entries
 // to derive one from their own distribution.
