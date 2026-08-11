@@ -27,7 +27,7 @@ type Neighbour struct {
 	Depth      int      `json:"depth"`
 	Via        string   `json:"via" jsonschema:"type of the relation on the last hop"`
 	Confidence int      `json:"confidence" jsonschema:"how many declarations back the last hop; 1 means a single unconfirmed assertion"`
-	GroupCount int      `json:"group_count,omitempty" jsonschema:"how many distinct threat actors are linked to this entry. A high count means it is generic: its presence says little about who is behind an intrusion"`
+	GroupCount int      `json:"group_count" jsonschema:"how many distinct threat actors are linked to this entry. 1 is the strongest attribution signal: only this actor is known to use it. 0 means NO actor is linked at all — absence of data, not exclusivity, so it supports nothing. High values mean generic"`
 	Generic    bool     `json:"generic,omitempty" jsonschema:"linked to enough actors that it carries no attribution value on its own"`
 	Bridge     bool     `json:"bridge,omitempty" jsonschema:"the last hop is the only link joining these two parts of the graph. A bridge with confidence 1 rests on one unverified assertion and should be treated as provisional"`
 	FromUUID   string   `json:"from_uuid" jsonschema:"node this one was reached from"`
