@@ -2,6 +2,7 @@ package galaxy
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -662,6 +663,105 @@ func TestUnattributedRanksAfterAttributed(t *testing.T) {
 	}
 	if order[0] != "t-exclusive" || order[1] != "t-shared" || order[2] != "t-orphan" {
 		t.Errorf("want exclusive, shared, then the unattributed entry; got %v", order)
+	}
+}
+
+func TestGenericThresholdIsPerGalaxy(t *testing.T) {
+	// A fixed cut-off cannot serve galaxies whose distributions differ by an
+	// order of magnitude: one may top out at 3 actors and another at 60. The
+	// galaxy needs enough attributed entries for a percentile to describe
+	// anything, hence the twelve techniques below.
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Twelve techniques: ten used by one actor each, one by three, one by all
+	// twelve. Only the last should end up above the 90th percentile.
+	var actors []map[string]any
+	var techniques []map[string]any
+	for i := 0; i < 12; i++ {
+		rel := []map[string]any{{"dest-uuid": "busy", "type": "uses"}}
+		rel = append(rel, map[string]any{
+			"dest-uuid": fmt.Sprintf("t-%d", i), "type": "uses",
+		})
+		if i < 3 {
+			rel = append(rel, map[string]any{"dest-uuid": "quiet", "type": "uses"})
+		}
+		actors = append(actors, map[string]any{
+			"value":   fmt.Sprintf("Actor %d", i),
+			"uuid":    fmt.Sprintf("a-%d", i),
+			"related": rel,
+		})
+		techniques = append(techniques, map[string]any{
+			"value": fmt.Sprintf("Technique %d", i),
+			"uuid":  fmt.Sprintf("t-%d", i),
+		})
+	}
+	techniques = append(techniques,
+		map[string]any{"value": "Busy", "uuid": "busy"},
+		map[string]any{"value": "Quiet", "uuid": "quiet"},
+	)
+	writeCluster(t, clusters, "threat-actor", actors)
+	writeCluster(t, clusters, "mitre-attack-pattern", techniques)
+
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	busy, _ := g.Node("busy")
+	quiet, _ := g.Node("quiet")
+	if busy.GroupCount != 12 || quiet.GroupCount != 3 {
+		t.Fatalf("fixture broken: busy=%d quiet=%d, want 12 and 3", busy.GroupCount, quiet.GroupCount)
+	}
+
+	threshold, ok := g.GenericThreshold("mitre-attack-pattern")
+	if !ok {
+		t.Fatal("the galaxy has enough attributed entries; expected a derived threshold")
+	}
+	if threshold < quiet.GroupCount || threshold >= busy.GroupCount {
+		t.Errorf("threshold %d should sit between the two, got quiet=%d busy=%d",
+			threshold, quiet.GroupCount, busy.GroupCount)
+	}
+
+	found := g.Neighbours("a-0", NeighbourOpts{Depth: 1})
+	byUUID := map[string]Neighbour{}
+	for _, n := range found {
+		byUUID[n.UUID] = n
+	}
+	if !byUUID["busy"].Generic {
+		t.Error("the entry every actor uses should be flagged generic")
+	}
+	if byUUID["quiet"].Generic {
+		t.Error("the entry three actors use should not be flagged generic")
+	}
+	if byUUID["busy"].GenericThreshold != threshold {
+		t.Errorf("the threshold an entry was judged against must be reported, got %d",
+			byUUID["busy"].GenericThreshold)
+	}
+}
+
+func TestSmallGalaxyFallsBackToFixedThreshold(t *testing.T) {
+	// A percentile over a handful of entries describes those entries, not a
+	// distribution: it would label whatever sits at the top of a nearly empty
+	// galaxy as generic. Such galaxies must fall back instead.
+	g := actorGraph(t) // two techniques, well under the minimum sample
+	if _, ok := g.GenericThreshold("mitre-attack-pattern"); ok {
+		t.Error("a galaxy with two attributed entries should not get a derived threshold")
+	}
+
+	found := g.Neighbours("a-1", NeighbourOpts{Depth: 1})
+	for _, n := range found {
+		if n.GenericThreshold != GenericFallbackThreshold {
+			t.Errorf("%s judged against %d, want the fallback %d",
+				n.UUID, n.GenericThreshold, GenericFallbackThreshold)
+		}
+		if n.Generic {
+			t.Errorf("%s has %d actors, well under the fallback, and should not be generic",
+				n.UUID, n.GroupCount)
+		}
 	}
 }
 

@@ -20,19 +20,20 @@ const (
 
 // Neighbour is one node reached from a starting point.
 type Neighbour struct {
-	UUID       string   `json:"uuid"`
-	Tag        string   `json:"tag,omitempty" jsonschema:"canonical MISP galaxy tag for this entry"`
-	Value      string   `json:"value,omitempty"`
-	Galaxy     string   `json:"galaxy,omitempty"`
-	Depth      int      `json:"depth"`
-	Via        string   `json:"via" jsonschema:"type of the relation on the last hop"`
-	Confidence int      `json:"confidence" jsonschema:"how many declarations back the last hop; 1 means a single unconfirmed assertion"`
-	GroupCount int      `json:"group_count" jsonschema:"how many distinct threat actors are linked to this entry. 1 is the strongest attribution signal: only this actor is known to use it. 0 means NO actor is linked at all — absence of data, not exclusivity, so it supports nothing. High values mean generic"`
-	Generic    bool     `json:"generic,omitempty" jsonschema:"linked to enough actors that it carries no attribution value on its own"`
-	Bridge     bool     `json:"bridge,omitempty" jsonschema:"the last hop is the only link joining these two parts of the graph. A bridge with confidence 1 rests on one unverified assertion and should be treated as provisional"`
-	FromUUID   string   `json:"from_uuid" jsonschema:"node this one was reached from"`
-	Dangling   bool     `json:"dangling,omitempty" jsonschema:"referenced by a relation but not defined in this checkout"`
-	Path       []string `json:"path,omitempty" jsonschema:"uuids from the origin to this node, when requested"`
+	UUID             string   `json:"uuid"`
+	Tag              string   `json:"tag,omitempty" jsonschema:"canonical MISP galaxy tag for this entry"`
+	Value            string   `json:"value,omitempty"`
+	Galaxy           string   `json:"galaxy,omitempty"`
+	Depth            int      `json:"depth"`
+	Via              string   `json:"via" jsonschema:"type of the relation on the last hop"`
+	Confidence       int      `json:"confidence" jsonschema:"how many declarations back the last hop; 1 means a single unconfirmed assertion"`
+	GroupCount       int      `json:"group_count" jsonschema:"how many distinct threat actors are linked to this entry. 1 is the strongest attribution signal: only this actor is known to use it. 0 means NO actor is linked at all — absence of data, not exclusivity, so it supports nothing. 0 is also normal on an actor entry, which is never counted against itself"`
+	Generic          bool     `json:"generic,omitempty" jsonschema:"linked to more actors than 90% of its own galaxy, so it carries no attribution value on its own"`
+	GenericThreshold int      `json:"generic_threshold,omitempty" jsonschema:"the group_count above which an entry of this galaxy is treated as generic. Galaxies differ enormously, so this is derived per galaxy rather than fixed"`
+	Bridge           bool     `json:"bridge,omitempty" jsonschema:"the last hop is the only link joining these two parts of the graph. A bridge with confidence 1 rests on one unverified assertion and should be treated as provisional"`
+	FromUUID         string   `json:"from_uuid" jsonschema:"node this one was reached from"`
+	Dangling         bool     `json:"dangling,omitempty" jsonschema:"referenced by a relation but not defined in this checkout"`
+	Path             []string `json:"path,omitempty" jsonschema:"uuids from the origin to this node, when requested"`
 }
 
 // NeighbourOpts tunes a traversal.
@@ -58,14 +59,38 @@ type NeighbourOpts struct {
 	SkipGhosts bool // drop dangling nodes from the result
 }
 
-// GenericThreshold is where an entry stops being a usable signature: linked to
-// this many actors or more.
+// GenericFallbackThreshold applies to galaxies with too few attributed entries
+// to derive one from their own distribution.
 //
-// Ten is a judgement call, not a measured boundary: the literature ranks
-// entries by actor count rather than declaring a cut-off, because the
-// distribution is continuous. The flag is a reading aid; group_count is the
-// number to reason with.
-const GenericThreshold = 10
+// 9 rather than 10 because the comparison is strict: an entry linked to 10
+// actors is generic, which is the cut-off this replaced. Getting that boundary
+// wrong would silently reclassify entries at exactly the old threshold.
+const GenericFallbackThreshold = 9
+
+// neighbourRank orders neighbours by what they are, before how specific they
+// are.
+//
+// Walking out from a malware, the actor using it is almost always what the
+// caller came for, and burying it among two dozen undocumented techniques
+// helps nobody. Sorting on group_count alone did exactly that: an actor scores
+// 0 by construction and landed in the same bucket as techniques nobody is
+// recorded as using.
+func neighbourRank(n Neighbour) int {
+	switch {
+	case ActorGalaxies[strings.ToLower(n.Galaxy)]:
+		return 0
+	case n.Dangling:
+		// Nothing is known about these beyond the fact that something points
+		// at them; last, whatever else they carry.
+		return 3
+	case n.GroupCount > 0:
+		// Attributed: an actual signal, ordered by specificity below.
+		return 1
+	default:
+		// Reachable but linked to no actor — absence of data, not exclusivity.
+		return 2
+	}
+}
 
 // Neighbours walks outward from a node, breadth first, and returns what it
 // reached. Nodes are reported at the shallowest depth they were found at.
@@ -127,13 +152,18 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 			if opt.Galaxies != nil && inScope != nil && !inScope[strings.ToLower(e.To.Galaxy)] {
 				continue
 			}
+			threshold, ok := g.GenericThreshold(e.To.Galaxy)
+			if !ok {
+				threshold = GenericFallbackThreshold
+			}
 			n := Neighbour{
 				UUID: e.To.UUID, Tag: e.To.Tag(), Value: e.To.Value, Galaxy: e.To.Galaxy,
 				Depth: cur.depth + 1, Via: via,
 				Confidence: e.Confidence, Bridge: e.Bridge,
-				GroupCount: e.To.GroupCount,
-				Generic:    e.To.GroupCount >= GenericThreshold,
-				FromUUID:   cur.node.UUID, Dangling: e.To.Dangling,
+				GroupCount:       e.To.GroupCount,
+				Generic:          e.To.GroupCount > threshold,
+				GenericThreshold: threshold,
+				FromUUID:         cur.node.UUID, Dangling: e.To.Dangling,
 			}
 			if opt.WithPaths {
 				n.Path = path
@@ -149,31 +179,20 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 		if out[i].Depth != out[j].Depth {
 			return out[i].Depth < out[j].Depth
 		}
-		// Attributed entries before unattributed ones — but only for entries
-		// that *could* carry an attribution. A count of 0 on a technique or a
-		// malware means nobody is recorded as using it: absence of data, not
-		// exclusivity, and ranking it first would dress a gap as the strongest
-		// signal on the page. A count of 0 on an actor means nothing at all,
-		// since actors are never counted against themselves — demoting those
-		// would bury the very neighbours a walk from a malware is looking for.
-		ui, uj := unattributed(out[i]), unattributed(out[j])
-		if ui != uj {
-			return uj
+		// What the neighbour IS comes before how specific it is: actors first,
+		// then attributed entries, then those linked to nobody, then the ones
+		// this checkout knows nothing about.
+		ri, rj := neighbourRank(out[i]), neighbourRank(out[j])
+		if ri != rj {
+			return ri < rj
 		}
-		// Among entries that carry a count, fewer actors means more
-		// discriminating.
+		// Within attributed entries, fewer actors means more discriminating.
 		if out[i].GroupCount != out[j].GroupCount {
 			return out[i].GroupCount < out[j].GroupCount
 		}
 		return out[i].Value < out[j].Value
 	})
 	return out
-}
-
-// unattributed reports an entry that should have an actor linked to it and has
-// none. Actor entries are excluded: their count is 0 by construction.
-func unattributed(n Neighbour) bool {
-	return n.GroupCount == 0 && !ActorGalaxies[strings.ToLower(n.Galaxy)]
 }
 
 // PathHop is one step along a discovered path.
