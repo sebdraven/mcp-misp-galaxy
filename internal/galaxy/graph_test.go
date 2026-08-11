@@ -765,6 +765,57 @@ func TestSmallGalaxyFallsBackToFixedThreshold(t *testing.T) {
 	}
 }
 
+func TestLimitAppliesAfterRanking(t *testing.T) {
+	// The bug this guards against: stopping the walk once Limit results are
+	// collected. The ranking could then only reorder whichever neighbours the
+	// traversal happened to reach first, so a walk from a malware could drop
+	// the actor using it while still looking like a ranked list.
+	//
+	// The actor is declared last here, so arrival order puts it behind every
+	// technique. With a limit of 1 it must still be the one returned.
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	rel := []map[string]any{}
+	var techniques []map[string]any
+	for i := 0; i < 20; i++ {
+		uuid := fmt.Sprintf("t-%02d", i)
+		rel = append(rel, map[string]any{"dest-uuid": uuid, "type": "uses"})
+		techniques = append(techniques, map[string]any{
+			"value": fmt.Sprintf("Technique %02d", i), "uuid": uuid,
+		})
+	}
+	rel = append(rel, map[string]any{"dest-uuid": "a-1", "type": "used-by"})
+
+	writeCluster(t, clusters, "mitre-malware", []map[string]any{
+		{"value": "Family", "uuid": "m-1", "related": rel},
+	})
+	writeCluster(t, clusters, "mitre-attack-pattern", techniques)
+	writeCluster(t, clusters, "threat-actor", []map[string]any{
+		{"value": "The Actor", "uuid": "a-1"},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got := len(g.Neighbours("m-1", NeighbourOpts{Depth: 1})); got != 21 {
+		t.Fatalf("fixture broken: expected 21 neighbours, got %d", got)
+	}
+
+	found := g.Neighbours("m-1", NeighbourOpts{Depth: 1, Limit: 1})
+	if len(found) != 1 {
+		t.Fatalf("expected exactly one result, got %d", len(found))
+	}
+	if found[0].UUID != "a-1" {
+		t.Errorf("the limit must keep the top-ranked neighbour, not the first reached; got %s",
+			found[0].UUID)
+	}
+}
+
 func TestActorNeighboursAreNotDemoted(t *testing.T) {
 	// Actors carry group_count 0 by construction, since they are not counted
 	// against themselves. Treating that as "unattributed" would bury the actors
