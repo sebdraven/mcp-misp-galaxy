@@ -242,7 +242,7 @@ func (m *model) cycleGalaxyFilter(dir int) {
 // ---- actions ----------------------------------------------------------------
 
 func (m model) runSearch(q string) model {
-	res, err := m.svc.Resolve(q, nil, 100, true)
+	res, err := m.svc.Resolve(q, nil, 100, true, "")
 	if err != nil {
 		m.err = err.Error()
 		return m
