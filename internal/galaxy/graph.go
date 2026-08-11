@@ -15,11 +15,12 @@ import (
 // Graph is an immutable view of the MISP galaxy corpus. Every method is safe
 // for concurrent use because nothing mutates after Load returns.
 type Graph struct {
-	nodes    map[string]*Node // by UUID
-	index    map[string][]*Node
-	byGalaxy map[string][]*Node
-	galaxies map[string]GalaxyInfo
-	stats    Stats
+	nodes      map[string]*Node // by UUID
+	index      map[string][]*Node
+	byGalaxy   map[string][]*Node
+	galaxies   map[string]GalaxyInfo
+	thresholds map[string]int // per-galaxy generic cut-off
+	stats      Stats
 }
 
 // Holder carries the live graph and lets a reload swap it without locking
@@ -227,6 +228,7 @@ func Load(root, sourceRef string, opts ...LoadOption) (*Graph, error) {
 	g.loadGalaxyDefs(filepath.Join(root, "galaxies"))
 	bridges := g.markBridges()
 	g.countGroups()
+	g.thresholds = g.genericThresholds()
 
 	dangling, revoked, synthetic := 0, 0, 0
 	for _, n := range g.nodes {
@@ -375,6 +377,63 @@ func (g *Graph) MostGeneric(galaxyType string, limit int) []GenericEntry {
 		out = out[:limit]
 	}
 	return out
+}
+
+// GenericPercentile is the share of a galaxy's entries that are NOT considered
+// generic. An entry lands above it when more actors are linked to it than to
+// 90% of its galaxy.
+//
+// Relative rather than fixed, because the galaxies are not comparable: the
+// busiest ATT&CK techniques are linked to 30-60 actors while a whole galaxy of
+// malware families may top out at 3. A single cut-off marks almost everything
+// generic in one and nothing in the other.
+//
+// The cost is that an entry can become generic without changing, because the
+// corpus moved around it. That is why the threshold it was judged against is
+// reported alongside the flag rather than left implicit.
+const GenericPercentile = 0.90
+
+// genericThresholds computes, per galaxy, the group_count above which an entry
+// counts as generic.
+//
+// Entries with no actor at all are excluded from the distribution: they say
+// nothing about how widely shared a galaxy's entries are, and including them
+// would drag every threshold down to zero in the many galaxies where most
+// entries are unattributed.
+func (g *Graph) genericThresholds() map[string]int {
+	counts := map[string][]int{}
+	for _, n := range g.nodes {
+		if n.Dangling || n.GroupCount == 0 {
+			continue
+		}
+		key := strings.ToLower(n.Galaxy)
+		counts[key] = append(counts[key], n.GroupCount)
+	}
+
+	out := make(map[string]int, len(counts))
+	for galaxyType, values := range counts {
+		sort.Ints(values)
+		idx := int(float64(len(values)) * GenericPercentile)
+		if idx >= len(values) {
+			idx = len(values) - 1
+		}
+		threshold := values[idx]
+		// A threshold of 1 would mark as generic every entry linked to a single
+		// actor, which is the most discriminating case there is. Floor it.
+		if threshold < 2 {
+			threshold = 2
+		}
+		out[galaxyType] = threshold
+	}
+	return out
+}
+
+// GenericThreshold returns the group_count above which an entry of this galaxy
+// is treated as generic, and whether the galaxy had enough attributed entries
+// to compute one.
+func (g *Graph) GenericThreshold(galaxyType string) (int, bool) {
+	t, ok := g.thresholds[strings.ToLower(galaxyType)]
+	return t, ok
 }
 
 func containsString(haystack []string, needle string) bool {
