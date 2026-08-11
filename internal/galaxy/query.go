@@ -27,6 +27,8 @@ type Neighbour struct {
 	Depth      int      `json:"depth"`
 	Via        string   `json:"via" jsonschema:"type of the relation on the last hop"`
 	Confidence int      `json:"confidence" jsonschema:"how many declarations back the last hop; 1 means a single unconfirmed assertion"`
+	GroupCount int      `json:"group_count,omitempty" jsonschema:"how many distinct threat actors are linked to this entry. A high count means it is generic: its presence says little about who is behind an intrusion"`
+	Generic    bool     `json:"generic,omitempty" jsonschema:"linked to enough actors that it carries no attribution value on its own"`
 	Bridge     bool     `json:"bridge,omitempty" jsonschema:"the last hop is the only link joining these two parts of the graph. A bridge with confidence 1 rests on one unverified assertion and should be treated as provisional"`
 	FromUUID   string   `json:"from_uuid" jsonschema:"node this one was reached from"`
 	Dangling   bool     `json:"dangling,omitempty" jsonschema:"referenced by a relation but not defined in this checkout"`
@@ -41,14 +43,29 @@ type Neighbour struct {
 // because a human asserted it. Narrowing a traversal is done explicitly with
 // Galaxies.
 type NeighbourOpts struct {
-	Depth      int       // hops, default 1
-	Direction  Direction // default Both
-	EdgeTypes  []string  // keep only these relation types; empty keeps all
-	Galaxies   []string  // keep only entries from these galaxy types; empty keeps all
-	Limit      int       // max nodes returned, default 200
-	WithPaths  bool      // record the route to each node
-	SkipGhosts bool      // drop dangling nodes from the result
+	Depth     int       // hops, default 1
+	Direction Direction // default Both
+	EdgeTypes []string  // keep only these relation types; empty keeps all
+	Galaxies  []string  // keep only entries from these galaxy types; empty keeps all
+
+	// MaxGroupCount drops entries linked to more than this many threat actors:
+	// the generic behaviours every group shares, which therefore distinguish
+	// none of them. Unlike Galaxies, this blocks traversal as well as reporting.
+	MaxGroupCount int
+
+	Limit      int  // max nodes returned, default 200
+	WithPaths  bool // record the route to each node
+	SkipGhosts bool // drop dangling nodes from the result
 }
+
+// GenericThreshold is where an entry stops being a usable signature: linked to
+// this many actors or more.
+//
+// Ten is a judgement call, not a measured boundary: the literature ranks
+// entries by actor count rather than declaring a cut-off, because the
+// distribution is continuous. The flag is a reading aid; group_count is the
+// number to reason with.
+const GenericThreshold = 10
 
 // Neighbours walks outward from a node, breadth first, and returns what it
 // reached. Nodes are reported at the shallowest depth they were found at.
@@ -89,6 +106,16 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 			if !ok || visited[e.To] {
 				continue
 			}
+			// Generic entries block the walk rather than merely being hidden
+			// from it — the opposite of the galaxy filter below, and
+			// deliberately so. A technique shared by dozens of actors is a hub:
+			// routing through it connects everything to everything, which
+			// manufactures adjacency that means nothing. A galaxy outside the
+			// filter is just uninteresting to report; a generic node is
+			// actively misleading to travel through.
+			if opt.MaxGroupCount > 0 && e.To.GroupCount > opt.MaxGroupCount {
+				continue
+			}
 			visited[e.To] = true
 
 			path := append(append([]string(nil), cur.path...), e.To.UUID)
@@ -104,7 +131,9 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 				UUID: e.To.UUID, Tag: e.To.Tag(), Value: e.To.Value, Galaxy: e.To.Galaxy,
 				Depth: cur.depth + 1, Via: via,
 				Confidence: e.Confidence, Bridge: e.Bridge,
-				FromUUID: cur.node.UUID, Dangling: e.To.Dangling,
+				GroupCount: e.To.GroupCount,
+				Generic:    e.To.GroupCount >= GenericThreshold,
+				FromUUID:   cur.node.UUID, Dangling: e.To.Dangling,
 			}
 			if opt.WithPaths {
 				n.Path = path
@@ -119,6 +148,11 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Depth != out[j].Depth {
 			return out[i].Depth < out[j].Depth
+		}
+		// Specific before generic: what distinguishes this entry should be read
+		// first, and what every group shares should sink to the bottom.
+		if out[i].GroupCount != out[j].GroupCount {
+			return out[i].GroupCount < out[j].GroupCount
 		}
 		return out[i].Value < out[j].Value
 	})

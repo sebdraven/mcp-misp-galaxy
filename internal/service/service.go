@@ -181,6 +181,7 @@ type NodeDetail struct {
 	Description string         `json:"description,omitempty"`
 	Synonyms    []string       `json:"synonyms,omitempty"`
 	Revoked     bool           `json:"revoked,omitempty"`
+	GroupCount  int            `json:"group_count,omitempty" jsonschema:"how many distinct threat actors are linked to this entry; high means generic"`
 	Synthetic   bool           `json:"synthetic,omitempty" jsonschema:"the corpus published this entry without a uuid; the uuid field is a locally derived key, not a MISP identifier"`
 	Dangling    bool           `json:"dangling,omitempty"`
 	Meta        map[string]any `json:"meta,omitempty"`
@@ -204,6 +205,7 @@ func (s *Service) Node(uuid string) (NodeDetail, error) {
 		UUID: n.UUID, Tag: n.Tag(), Value: n.Value, Galaxy: n.Galaxy,
 		Description: n.Description, Synonyms: n.Synonyms,
 		Revoked: n.Revoked, Synthetic: n.Synthetic, Dangling: n.Dangling,
+		GroupCount:  n.GroupCount,
 		Degree:      len(n.Out) + len(n.In),
 		RelationsBy: map[string]int{},
 	}
@@ -301,6 +303,29 @@ func (s *Service) Galaxies() ([]galaxy.GalaxyInfo, error) {
 		return nil, err
 	}
 	return g.Galaxies(), nil
+}
+
+// GenericResult lists the least discriminating entries of a galaxy.
+type GenericResult struct {
+	Galaxy  string                `json:"galaxy,omitempty"`
+	Count   int                   `json:"count"`
+	Entries []galaxy.GenericEntry `json:"entries"`
+	Note    string                `json:"note"`
+}
+
+// MostGeneric returns the entries linked to the most threat actors.
+func (s *Service) MostGeneric(galaxyType string, limit int) (GenericResult, error) {
+	g, err := s.graph()
+	if err != nil {
+		return GenericResult{}, err
+	}
+	entries := g.MostGeneric(galaxyType, limit)
+	return GenericResult{
+		Galaxy:  galaxyType,
+		Count:   len(entries),
+		Entries: entries,
+		Note:    "these entries are used by many actors; their presence in an intrusion does not point at any of them",
+	}, nil
 }
 
 // StatusResult combines graph stats with the state of the data checkout.

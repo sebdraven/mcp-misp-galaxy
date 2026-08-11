@@ -98,6 +98,15 @@ type Node struct {
 	// so it must never be reported as a corpus identifier.
 	Synthetic bool
 
+	// GroupCount is how many distinct threat actors are linked to this entry.
+	//
+	// It measures specificity, not importance. A technique used by 79 groups
+	// tells you almost nothing about who is behind an intrusion, while one used
+	// by a single group is a candidate behavioural signature. The CTI
+	// literature is blunt about this: most techniques are generic, and treating
+	// them as evidence is how misattribution happens.
+	GroupCount int
+
 	Out []Edge
 	In  []Edge
 }
@@ -158,6 +167,56 @@ func Tag(galaxyType, value string) string {
 	}
 	return TagNamespace + ":" + galaxyType + `="` + strings.ReplaceAll(value, `"`, `\"`) + `"`
 }
+
+// ActorGalaxies are the galaxy types whose entries denote a threat actor.
+//
+// Specificity is counted against these and nothing else: "how many actors use
+// this" is the question that separates a behavioural signature from background
+// noise. Counting every neighbour instead would make a technique linked to
+// dozens of sub-techniques look popular when no actor uses it at all.
+//
+// The list is maintained by hand. The corpus offers no usable signal for it:
+// only one galaxy declares category "threat-actor" (terrorist-groups), while
+// threat-actor, mitre-intrusion-set and groups declare nothing of the sort.
+// See the issue on deriving this from meta-key signatures.
+//
+// Measured on the 2026-08 checkout, relations are extremely unevenly spread
+// across these: threat-actor carries 166 entries with relations,
+// microsoft-activity-group 68, 360net-threat-actor 12, mitre-ics-groups 5, and
+// groups and intelligence-agency exactly zero. So in practice group_count is
+// dominated by the MITRE galaxies; the others are kept because they cost
+// nothing and may be populated later.
+var ActorGalaxies = map[string]bool{
+	// MITRE, where nearly all the relations actually are.
+	"mitre-intrusion-set":                   true,
+	"mitre-enterprise-attack-intrusion-set": true,
+	"mitre-mobile-attack-intrusion-set":     true,
+	"mitre-pre-attack-intrusion-set":        true,
+	"mitre-ics-groups":                      true,
+
+	// Vendor and community actor taxonomies.
+	"threat-actor":             true,
+	"microsoft-activity-group": true,
+	"360net-threat-actor":      true,
+	"groups":                   true, // Tidal
+	"intelligence-agency":      true,
+
+	// The only galaxy that declares category "threat-actor" in the corpus.
+	// Included for consistency — excluding the one entry the data calls an
+	// actor while including ten it does not would be indefensible — though
+	// these are state-listed entities rather than tracked intrusion sets.
+	"canada-listed-terrorist-entities": true,
+}
+
+// Deliberately NOT actors, though the question comes up:
+//
+//	surveillance-vendor, producer  — they build and sell tooling rather than
+//	                                 operate it; counting a vendor as a user of
+//	                                 its own product would inflate specificity
+//	                                 for exactly the families it sells.
+//	campaigns                      — activity clusters, not the entity behind
+//	                                 them. A campaign and its actor would
+//	                                 otherwise count as two users of one tool.
 
 // GalaxyInfo describes one galaxy and how many nodes it contributed.
 type GalaxyInfo struct {

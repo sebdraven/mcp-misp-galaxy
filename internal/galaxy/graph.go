@@ -226,6 +226,7 @@ func Load(root, sourceRef string, opts ...LoadOption) (*Graph, error) {
 	report("index", len(g.nodes), len(g.nodes))
 	g.loadGalaxyDefs(filepath.Join(root, "galaxies"))
 	bridges := g.markBridges()
+	g.countGroups()
 
 	dangling, revoked, synthetic := 0, 0, 0
 	for _, n := range g.nodes {
@@ -303,6 +304,77 @@ const syntheticKeyPrefix = "synthetic::"
 
 func syntheticKey(galaxyType, value string) string {
 	return syntheticKeyPrefix + galaxyType + "::" + value
+}
+
+// countGroups records, for every node, how many distinct threat actors are
+// linked to it.
+//
+// This is the specificity signal: an entry linked to one actor can serve as a
+// behavioural signature, one linked to dozens cannot. Distinct actors, not
+// distinct edges — a link declared from both sides is one actor, not two.
+func (g *Graph) countGroups() {
+	for _, n := range g.nodes {
+		seen := make(map[*Node]bool)
+		for _, e := range undirectedEdges(n) {
+			if e.To == n || seen[e.To] {
+				continue
+			}
+			if ActorGalaxies[strings.ToLower(e.To.Galaxy)] {
+				seen[e.To] = true
+			}
+		}
+		n.GroupCount = len(seen)
+	}
+}
+
+// GenericEntry is one entry ranked by how many actors are linked to it.
+//
+// A type of its own rather than reusing Candidate: a resolver candidate
+// carries why it matched a query, and there is no query here. Reporting an
+// empty reason and a score of zero would invite a caller to read meaning into
+// fields that never applied.
+type GenericEntry struct {
+	UUID       string `json:"uuid"`
+	Tag        string `json:"tag,omitempty"`
+	Value      string `json:"value"`
+	Galaxy     string `json:"galaxy"`
+	GroupCount int    `json:"group_count" jsonschema:"distinct threat actors linked to this entry"`
+	Degree     int    `json:"degree"`
+}
+
+// MostGeneric returns the entries of a galaxy linked to the most threat
+// actors, worst offenders first.
+//
+// Useful before reading any list of relations: these are the entries to
+// discount, because their presence says nothing about who was behind an
+// intrusion. An empty galaxyType looks across the whole corpus.
+func (g *Graph) MostGeneric(galaxyType string, limit int) []GenericEntry {
+	if limit <= 0 {
+		limit = 10
+	}
+	var out []GenericEntry
+	for _, n := range g.nodes {
+		if n.Dangling || n.GroupCount == 0 {
+			continue
+		}
+		if galaxyType != "" && !strings.EqualFold(n.Galaxy, galaxyType) {
+			continue
+		}
+		out = append(out, GenericEntry{
+			UUID: n.UUID, Tag: n.Tag(), Value: n.Value, Galaxy: n.Galaxy,
+			GroupCount: n.GroupCount, Degree: len(n.Out) + len(n.In),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].GroupCount != out[j].GroupCount {
+			return out[i].GroupCount > out[j].GroupCount
+		}
+		return out[i].Value < out[j].Value
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
 }
 
 func containsString(haystack []string, needle string) bool {

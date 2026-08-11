@@ -22,17 +22,18 @@ const (
 // galaxies — so collapsing to one answer produces silent misattribution. The
 // caller (or the analyst) picks; this only orders the options and says why.
 type Candidate struct {
-	UUID      string   `json:"uuid"`
-	Tag       string   `json:"tag,omitempty" jsonschema:"canonical MISP galaxy tag, e.g. misp-galaxy:threat-actor=\"APT28\" — this is what gets attached to a MISP event"`
-	Value     string   `json:"value"`
-	Galaxy    string   `json:"galaxy"`
-	Reason    string   `json:"reason" jsonschema:"why this matched: value, synonym, value_prefix, synonym_prefix or substring"`
-	Matched   string   `json:"matched" jsonschema:"the name or synonym that actually matched"`
-	Score     int      `json:"score"`
-	Degree    int      `json:"degree" jsonschema:"number of relations on this entry. 0 means it cannot be traversed: gx_neighbors and gx_path will return nothing from it. When several candidates name the same thing, prefer the one with a non-zero degree"`
-	Revoked   bool     `json:"revoked,omitempty" jsonschema:"the corpus marks this entry as deprecated; it is ranked below live entries but still returned"`
-	Synthetic bool     `json:"synthetic,omitempty" jsonschema:"the corpus published this entry without a uuid; the uuid field is a locally derived key, not a MISP identifier, and no relation can point at it"`
-	Synonyms  []string `json:"synonyms,omitempty"`
+	UUID       string   `json:"uuid"`
+	Tag        string   `json:"tag,omitempty" jsonschema:"canonical MISP galaxy tag, e.g. misp-galaxy:threat-actor=\"APT28\" — this is what gets attached to a MISP event"`
+	Value      string   `json:"value"`
+	Galaxy     string   `json:"galaxy"`
+	Reason     string   `json:"reason" jsonschema:"why this matched: value, synonym, value_prefix, synonym_prefix or substring"`
+	Matched    string   `json:"matched" jsonschema:"the name or synonym that actually matched"`
+	Score      int      `json:"score"`
+	Degree     int      `json:"degree" jsonschema:"number of relations on this entry. 0 means it cannot be traversed: gx_neighbors and gx_path will return nothing from it. When several candidates name the same thing, prefer the one with a non-zero degree"`
+	GroupCount int      `json:"group_count,omitempty" jsonschema:"how many distinct threat actors are linked to this entry. High values mean the entry is generic and carries little attribution value"`
+	Revoked    bool     `json:"revoked,omitempty" jsonschema:"the corpus marks this entry as deprecated; it is ranked below live entries but still returned"`
+	Synthetic  bool     `json:"synthetic,omitempty" jsonschema:"the corpus published this entry without a uuid; the uuid field is a locally derived key, not a MISP identifier, and no relation can point at it"`
+	Synonyms   []string `json:"synonyms,omitempty"`
 }
 
 // normalise folds the spelling variants that plague actor names: case, spacing
@@ -140,8 +141,9 @@ func (g *Graph) Resolve(q string, galaxies []string, limit int) []Candidate {
 			// the MITRE galaxies: the same malware can resolve to three
 			// entries, of which only one has any edges at all, and nothing
 			// else in the result says which.
-			Degree:  len(n.Out) + len(n.In),
-			Revoked: n.Revoked, Synthetic: n.Synthetic, Synonyms: n.Synonyms,
+			Degree:     len(n.Out) + len(n.In),
+			GroupCount: n.GroupCount,
+			Revoked:    n.Revoked, Synthetic: n.Synthetic, Synonyms: n.Synonyms,
 		}
 	}
 
