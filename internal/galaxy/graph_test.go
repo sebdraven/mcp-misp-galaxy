@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -597,6 +598,130 @@ func TestSpecificNeighboursRankBeforeGeneric(t *testing.T) {
 	}
 	if found[0].UUID != "t-rare" {
 		t.Errorf("the exclusive technique should come first, got %+v", found)
+	}
+}
+
+func TestUnattributedRanksAfterAttributed(t *testing.T) {
+	// An entry no actor is linked to is not the most specific one, it is the
+	// uninformative one. Ranking it first would present a gap in the data as
+	// the strongest signal on the page — the exact mechanism by which
+	// under-reporting turns into false attribution.
+	//
+	// The unattributed entry has to be reached from something that is NOT an
+	// actor, or countGroups would credit it with one. Here the malware is the
+	// origin, and t-orphan hangs off it alone.
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters, "mitre-malware", []map[string]any{
+		{"value": "Family", "uuid": "m-1", "related": []map[string]any{
+			{"dest-uuid": "t-exclusive", "type": "uses"},
+			{"dest-uuid": "t-orphan", "type": "uses"},
+			{"dest-uuid": "t-shared", "type": "uses"},
+		}},
+	})
+	writeCluster(t, clusters, "threat-actor", []map[string]any{
+		{"value": "Actor One", "uuid": "a-1", "related": []map[string]any{
+			{"dest-uuid": "t-exclusive", "type": "uses"},
+			{"dest-uuid": "t-shared", "type": "uses"},
+		}},
+		{"value": "Actor Two", "uuid": "a-2", "related": []map[string]any{
+			{"dest-uuid": "t-shared", "type": "uses"},
+		}},
+	})
+	writeCluster(t, clusters, "mitre-attack-pattern", []map[string]any{
+		{"value": "Exclusive", "uuid": "t-exclusive"},
+		{"value": "Shared", "uuid": "t-shared"},
+		{"value": "Orphan", "uuid": "t-orphan"},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// The fixture only tests anything if it really produces 1, 2 and 0.
+	for uuid, want := range map[string]int{"t-exclusive": 1, "t-shared": 2, "t-orphan": 0} {
+		n, ok := g.Node(uuid)
+		if !ok {
+			t.Fatalf("%s missing from the graph", uuid)
+		}
+		if n.GroupCount != want {
+			t.Fatalf("fixture broken: %s has group_count %d, want %d", uuid, n.GroupCount, want)
+		}
+	}
+
+	found := g.Neighbours("m-1", NeighbourOpts{Depth: 1})
+	var order []string
+	for _, n := range found {
+		order = append(order, n.UUID)
+	}
+	if len(order) != 3 {
+		t.Fatalf("expected three neighbours, got %v", order)
+	}
+	if order[0] != "t-exclusive" || order[1] != "t-shared" || order[2] != "t-orphan" {
+		t.Errorf("want exclusive, shared, then the unattributed entry; got %v", order)
+	}
+}
+
+func TestActorNeighboursAreNotDemoted(t *testing.T) {
+	// Actors carry group_count 0 by construction, since they are not counted
+	// against themselves. Treating that as "unattributed" would bury the actors
+	// at the bottom of a walk from a malware — which is the one thing such a
+	// walk is usually looking for.
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters, "mitre-malware", []map[string]any{
+		{"value": "Family", "uuid": "m-1", "related": []map[string]any{
+			{"dest-uuid": "t-orphan", "type": "uses"},
+		}},
+	})
+	writeCluster(t, clusters, "threat-actor", []map[string]any{
+		{"value": "The Actor", "uuid": "a-1", "related": []map[string]any{
+			{"dest-uuid": "m-1", "type": "uses"},
+		}},
+	})
+	writeCluster(t, clusters, "mitre-attack-pattern", []map[string]any{
+		{"value": "Orphan", "uuid": "t-orphan"},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	actor, _ := g.Node("a-1")
+	if actor.GroupCount != 0 {
+		t.Fatalf("fixture broken: the actor should carry group_count 0, got %d", actor.GroupCount)
+	}
+
+	found := g.Neighbours("m-1", NeighbourOpts{Depth: 1})
+	if len(found) != 2 {
+		t.Fatalf("expected the actor and the technique, got %+v", found)
+	}
+	if found[0].UUID != "a-1" {
+		t.Errorf("the actor must not be demoted for having no group count, got %v",
+			[]string{found[0].UUID, found[1].UUID})
+	}
+}
+
+func TestZeroGroupCountIsReportedNotOmitted(t *testing.T) {
+	// A missing field and a count of zero read the same way in JSON, and they
+	// mean opposite things here. The field must always be emitted.
+	g := chainGraph(t)
+	found := g.Neighbours("u-nasty", NeighbourOpts{Depth: 1})
+	if len(found) == 0 {
+		t.Fatal("expected at least one neighbour")
+	}
+	raw, err := json.Marshal(found[0])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"group_count"`) {
+		t.Errorf("group_count must be present even at zero, got %s", raw)
 	}
 }
 

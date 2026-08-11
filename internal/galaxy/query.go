@@ -27,7 +27,7 @@ type Neighbour struct {
 	Depth      int      `json:"depth"`
 	Via        string   `json:"via" jsonschema:"type of the relation on the last hop"`
 	Confidence int      `json:"confidence" jsonschema:"how many declarations back the last hop; 1 means a single unconfirmed assertion"`
-	GroupCount int      `json:"group_count,omitempty" jsonschema:"how many distinct threat actors are linked to this entry. A high count means it is generic: its presence says little about who is behind an intrusion"`
+	GroupCount int      `json:"group_count" jsonschema:"how many distinct threat actors are linked to this entry. 1 is the strongest attribution signal: only this actor is known to use it. 0 means NO actor is linked at all — absence of data, not exclusivity, so it supports nothing. High values mean generic"`
 	Generic    bool     `json:"generic,omitempty" jsonschema:"linked to enough actors that it carries no attribution value on its own"`
 	Bridge     bool     `json:"bridge,omitempty" jsonschema:"the last hop is the only link joining these two parts of the graph. A bridge with confidence 1 rests on one unverified assertion and should be treated as provisional"`
 	FromUUID   string   `json:"from_uuid" jsonschema:"node this one was reached from"`
@@ -149,14 +149,31 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 		if out[i].Depth != out[j].Depth {
 			return out[i].Depth < out[j].Depth
 		}
-		// Specific before generic: what distinguishes this entry should be read
-		// first, and what every group shares should sink to the bottom.
+		// Attributed entries before unattributed ones — but only for entries
+		// that *could* carry an attribution. A count of 0 on a technique or a
+		// malware means nobody is recorded as using it: absence of data, not
+		// exclusivity, and ranking it first would dress a gap as the strongest
+		// signal on the page. A count of 0 on an actor means nothing at all,
+		// since actors are never counted against themselves — demoting those
+		// would bury the very neighbours a walk from a malware is looking for.
+		ui, uj := unattributed(out[i]), unattributed(out[j])
+		if ui != uj {
+			return uj
+		}
+		// Among entries that carry a count, fewer actors means more
+		// discriminating.
 		if out[i].GroupCount != out[j].GroupCount {
 			return out[i].GroupCount < out[j].GroupCount
 		}
 		return out[i].Value < out[j].Value
 	})
 	return out
+}
+
+// unattributed reports an entry that should have an actor linked to it and has
+// none. Actor entries are excluded: their count is 0 by construction.
+func unattributed(n Neighbour) bool {
+	return n.GroupCount == 0 && !ActorGalaxies[strings.ToLower(n.Galaxy)]
 }
 
 // PathHop is one step along a discovered path.

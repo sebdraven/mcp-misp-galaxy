@@ -181,7 +181,7 @@ type NodeDetail struct {
 	Description string         `json:"description,omitempty"`
 	Synonyms    []string       `json:"synonyms,omitempty"`
 	Revoked     bool           `json:"revoked,omitempty"`
-	GroupCount  int            `json:"group_count,omitempty" jsonschema:"how many distinct threat actors are linked to this entry; high means generic"`
+	GroupCount  int            `json:"group_count" jsonschema:"how many distinct threat actors are linked to this entry. 1 means only one actor is known to use it; 0 means none is recorded, which is absence of data rather than exclusivity — and is normal for an actor entry, since actors are not counted against themselves"`
 	Synthetic   bool           `json:"synthetic,omitempty" jsonschema:"the corpus published this entry without a uuid; the uuid field is a locally derived key, not a MISP identifier"`
 	Dangling    bool           `json:"dangling,omitempty"`
 	Meta        map[string]any `json:"meta,omitempty"`
