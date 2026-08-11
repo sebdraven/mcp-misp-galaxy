@@ -1,10 +1,11 @@
 // Package mcptools is the MCP façade over the same service the REST API uses.
 //
 // Tool descriptions carry more weight here than in a REST API: they are the
-// only thing a model reads before choosing. Two things are stated explicitly
+// only thing a model reads before choosing. Three things are stated explicitly
 // because getting them wrong produces confident misattribution — that
-// gx_resolve returns ranked candidates rather than an answer, and that a
-// revoked entry is still returned rather than hidden.
+// gx_resolve returns ranked candidates rather than an answer, that a revoked
+// entry is still returned rather than hidden, and that a high group_count
+// means an entry distinguishes nobody.
 package mcptools
 
 import (
@@ -62,6 +63,13 @@ func Register(s *mcp.Server, svc *service.Service) {
 	}, r.galaxies)
 
 	mcp.AddTool(s, &mcp.Tool{
+		Name: "gx_generic",
+		Description: "List the entries used by the most threat actors — the ones with the least attribution value. " +
+			"Read this before drawing conclusions from a list of relations: a technique or tool shared by dozens of actors says nothing about who was behind an intrusion, " +
+			"and treating it as evidence is a known route to misattribution. Pass a galaxy to scope it, e.g. mitre-attack-pattern for techniques or tool for shared tooling.",
+	}, r.generic)
+
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "gx_status",
 		Description: "Report the loaded graph (entry and relation counts) and the state of the misp-galaxy checkout, including the commit it was built from. " +
 			"Cite that commit when a result needs to be reproducible.",
@@ -84,14 +92,20 @@ type nodeInput struct {
 }
 
 type neighboursInput struct {
-	UUID         string   `json:"uuid" jsonschema:"starting entry UUID"`
-	Depth        int      `json:"depth,omitempty" jsonschema:"hops to walk (default 1); 2 already spans malware to actor to report"`
-	Direction    string   `json:"direction,omitempty" jsonschema:"both (default), out or in"`
-	Types        []string `json:"types,omitempty" jsonschema:"keep only these relation types, e.g. similar, used-by, subtechnique-of"`
-	Galaxies     []string `json:"galaxies,omitempty" jsonschema:"keep only entries from these galaxy types, e.g. ['references'] for documenting reports, ['malpedia'] for malware families"`
-	Limit        int      `json:"limit,omitempty" jsonschema:"max entries returned (default 200)"`
-	WithPaths    bool     `json:"with_paths,omitempty" jsonschema:"include the route taken to reach each entry"`
-	SkipDangling bool     `json:"skip_dangling,omitempty" jsonschema:"drop entries referenced by a relation but not defined in this checkout"`
+	UUID          string   `json:"uuid" jsonschema:"starting entry UUID"`
+	Depth         int      `json:"depth,omitempty" jsonschema:"hops to walk (default 1); 2 already spans malware to actor to report"`
+	Direction     string   `json:"direction,omitempty" jsonschema:"both (default), out or in"`
+	Types         []string `json:"types,omitempty" jsonschema:"keep only these relation types, e.g. similar, used-by, subtechnique-of"`
+	Galaxies      []string `json:"galaxies,omitempty" jsonschema:"keep only entries from these galaxy types, e.g. ['references'] for documenting reports, ['malpedia'] for malware families"`
+	MaxGroupCount int      `json:"max_group_count,omitempty" jsonschema:"keep only entries linked to AT MOST this many threat actors, and do not walk through the others. Inclusive: 5 keeps entries at 5 actors and drops those at 6. This boundary is not the same as the 'generic' flag, which is set from 10 actors upwards — pass 9 to remove everything flagged generic"`
+	Limit         int      `json:"limit,omitempty" jsonschema:"max entries returned (default 200)"`
+	WithPaths     bool     `json:"with_paths,omitempty" jsonschema:"include the route taken to reach each entry"`
+	SkipDangling  bool     `json:"skip_dangling,omitempty" jsonschema:"drop entries referenced by a relation but not defined in this checkout"`
+}
+
+type genericInput struct {
+	Galaxy string `json:"galaxy,omitempty" jsonschema:"restrict to one galaxy type, e.g. mitre-attack-pattern or tool; omit to look across the whole corpus"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"how many entries to return (default 10)"`
 }
 
 type pathInput struct {
@@ -124,14 +138,20 @@ func (r *registry) neighbours(ctx context.Context, _ *mcp.CallToolRequest, in ne
 		return nil, service.NeighboursResult{}, fmt.Errorf("uuid is required")
 	}
 	res, err := r.svc.Neighbours(in.UUID, galaxy.NeighbourOpts{
-		Depth:      in.Depth,
-		Direction:  galaxy.Direction(in.Direction),
-		EdgeTypes:  in.Types,
-		Galaxies:   in.Galaxies,
-		Limit:      in.Limit,
-		WithPaths:  in.WithPaths,
-		SkipGhosts: in.SkipDangling,
+		Depth:         in.Depth,
+		Direction:     galaxy.Direction(in.Direction),
+		EdgeTypes:     in.Types,
+		Galaxies:      in.Galaxies,
+		MaxGroupCount: in.MaxGroupCount,
+		Limit:         in.Limit,
+		WithPaths:     in.WithPaths,
+		SkipGhosts:    in.SkipDangling,
 	})
+	return nil, res, err
+}
+
+func (r *registry) generic(ctx context.Context, _ *mcp.CallToolRequest, in genericInput) (*mcp.CallToolResult, service.GenericResult, error) {
+	res, err := r.svc.MostGeneric(in.Galaxy, in.Limit)
 	return nil, res, err
 }
 
