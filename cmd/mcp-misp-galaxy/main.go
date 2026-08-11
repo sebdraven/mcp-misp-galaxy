@@ -66,6 +66,7 @@ func main() {
 		progress  = flag.Bool("progress", false, "force the load progress bar even when stderr is not a terminal")
 		scope     = flag.String("scope", envOr("GALAXY_SCOPE", ""), "comma-separated galaxies to search by default; empty uses the built-in CTI scope, \"all\" searches the whole corpus")
 		resolveQ  = flag.String("resolve", "", "resolve one name, print the ranked candidates as JSON, and exit")
+		normalisation = flag.String("normalisation", "standard", "name folding for -resolve: standard or aggressive")
 		showGx    = flag.Bool("galaxies", false, "print the galaxy inventory with entry counts and exit")
 		showStats = flag.Bool("stats", false, "print load statistics and exit")
 		showVer   = flag.Bool("version", false, "print the version and exit")
@@ -176,7 +177,7 @@ func main() {
 		return
 	}
 	if *resolveQ != "" {
-		res, err := svc.Resolve(*resolveQ, nil, 0, true)
+		res, err := svc.Resolve(*resolveQ, nil, 0, true, *normalisation)
 		if err != nil {
 			log.Fatal(err)
 		}
