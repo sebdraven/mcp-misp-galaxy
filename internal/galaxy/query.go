@@ -128,8 +128,13 @@ func neighbourRank(n Neighbour) int {
 // Stopping the walk at Limit instead would let arrival order decide what the
 // caller sees, and the ranking could only reorder whichever entries happened
 // to be reached first — so a walk from a malware could miss the actor using
-// it entirely while appearing to show "the most relevant" results. Hubs run to
-// a few hundred neighbours, so holding them all before truncating is cheap.
+// it entirely while appearing to show "the most relevant" results.
+//
+// Work is bounded by MaxVisited rather than by Limit, since the two are
+// different concerns: how much of the graph may be explored, and how much of
+// what was found gets returned. When the cap is hit the walk stops early and
+// the ranking applies to what was reached, so results stay ordered but may be
+// incomplete.
 func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 	start, ok := g.nodes[uuid]
 	if !ok {
@@ -140,6 +145,12 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 	}
 	if opt.Limit <= 0 {
 		opt.Limit = 200
+	}
+	if opt.MaxVisited <= 0 {
+		opt.MaxVisited = MaxVisitedDefault
+	}
+	if opt.Depth > MaxDepth {
+		opt.Depth = MaxDepth
 	}
 	if opt.Direction == "" {
 		opt.Direction = Both
@@ -156,7 +167,7 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 	queue := []entry{{node: start, depth: 0, path: []string{start.UUID}}}
 	var out []Neighbour
 
-	for len(queue) > 0 {
+	for len(queue) > 0 && len(visited) < opt.MaxVisited {
 		cur := queue[0]
 		queue = queue[1:]
 		if cur.depth == opt.Depth {
@@ -261,6 +272,9 @@ func (g *Graph) ShortestPath(fromUUID, toUUID string, maxDepth int, edgeTypes []
 	}
 	if maxDepth <= 0 {
 		maxDepth = 6
+	}
+	if maxDepth > MaxPathDepth {
+		maxDepth = MaxPathDepth
 	}
 	keep := edgeFilter(edgeTypes)
 
