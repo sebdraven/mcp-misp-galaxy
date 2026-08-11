@@ -58,26 +58,32 @@ const (
 	Aggressive Normalisation = "aggressive"
 )
 
-// collectiveSuffixes are the words taxonomies append to an actor name without
-// changing who it refers to: "Callisto" and "Callisto Group" are one entity.
-var collectiveSuffixes = []string{
-	"group", "groups", "gang", "team", "crew", "apt",
-	"cyberespionage", "cyberespionagegroup", "framework", "lair",
-}
-
-// platformPrefixes are the Malpedia-style platform qualifiers. Stripping them
-// is what lets win.icefog match icefog.
-var platformPrefixes = []string{
-	"win", "elf", "apk", "osx", "py", "js", "vbs", "jar", "symbian", "ios",
-}
-
 // mitreSuffix matches the identifier MITRE appends to display names, as in
-// "APT28 - G0096" or "LightSpy - S1185".
-var mitreSuffix = regexp.MustCompile(`\s*-\s*[GSTMC]\d{3,4}(\.\d{3})?\s*$`)
+// "APT28 - G0096", "LightSpy - S1185" or "PowerShell - T1059.001".
+var mitreSuffix = regexp.MustCompile(`\s*-\s*[GSTMC]\d{3,4}(\.\d{3,4})?\s*$`)
 
 // vendorSuffix matches a trailing vendor in parentheses: "Earth Preta
 // (Trendmicro)", "Hive 0081 (IBM)".
 var vendorSuffix = regexp.MustCompile(`\s*\([^)]*\)\s*$`)
+
+// platformPrefixPattern matches a platform qualifier followed by a separator,
+// as Malpedia writes them: win.icefog, apk.dragonegg.
+//
+// The separator is required. Matching the bare prefix against a folded key
+// would strip the start of any name that merely begins with those letters —
+// "window" would lose its "win", "iOSCheck" its "ios" — and nothing downstream
+// would reveal the mangling.
+var platformPrefixPattern = regexp.MustCompile(
+	`(?i)^(win|elf|apk|osx|py|js|vbs|jar|symbian|ios)[._\-/\s]+`)
+
+// collectiveSuffixPattern matches the words taxonomies append to an actor name
+// without changing who it refers to: "Callisto" and "Callisto Group" are one
+// entity.
+//
+// A word boundary is required for the same reason as above: without it,
+// "adapt" ends in "apt" and would be truncated to "ad".
+var collectiveSuffixPattern = regexp.MustCompile(
+	`(?i)[._\-/\s]+(group|groups|gang|team|crew|apt|cyberespionage|framework|lair)\s*$`)
 
 // normalise folds the spelling variants that plague actor names: case, spacing
 // and the hyphen/space/nothing alternation (APT28 / APT-28 / APT 28 all fold
@@ -96,43 +102,31 @@ func normalise(s string) string {
 	return b.String()
 }
 
-// normaliseAggressive strips taxonomy decoration before folding.
+// normaliseAggressive strips taxonomy decoration, then folds.
 //
-// Order matters: the identifier and vendor suffixes are matched against the
-// original string, where the separators they rely on still exist. Folding
-// first would erase the very spaces and parentheses that make them
-// recognisable.
+// Every strip happens on the ORIGINAL string, where the separators that mark a
+// decoration still exist. Doing it on the folded key would leave no way to
+// tell "win.icefog" from "window" or "Callisto Group" from "adapt" — the
+// delimiter is the only thing that says a prefix is a qualifier rather than
+// the first letters of a name.
 func normaliseAggressive(s string) string {
+	s = strings.TrimSpace(s)
 	s = mitreSuffix.ReplaceAllString(s, "")
 	s = vendorSuffix.ReplaceAllString(s, "")
 	s = strings.TrimSpace(s)
 
-	// A leading "the", on the original so the word boundary is still visible.
 	if lower := strings.ToLower(s); strings.HasPrefix(lower, "the ") {
 		s = s[4:]
 	}
 
-	key := normalise(s)
-
-	// Platform prefix, only when something is left after it: "win" alone is a
-	// name, "win.icefog" is a qualified one.
-	for _, p := range platformPrefixes {
-		if len(key) > len(p) && strings.HasPrefix(key, p) {
-			if rest := key[len(p):]; rest != "" {
-				key = rest
-				break
-			}
-		}
+	// Strip only if something remains: a name that IS the decoration keeps it.
+	if stripped := platformPrefixPattern.ReplaceAllString(s, ""); strings.TrimSpace(stripped) != "" {
+		s = stripped
 	}
-
-	// Collective suffix, same guard: "group" on its own stays "group".
-	for _, suffix := range collectiveSuffixes {
-		if len(key) > len(suffix) && strings.HasSuffix(key, suffix) {
-			key = key[:len(key)-len(suffix)]
-			break
-		}
+	if stripped := collectiveSuffixPattern.ReplaceAllString(s, ""); strings.TrimSpace(stripped) != "" {
+		s = stripped
 	}
-	return key
+	return normalise(s)
 }
 
 // buildIndex maps every normalised name and synonym to the nodes carrying it.
