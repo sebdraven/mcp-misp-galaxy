@@ -43,19 +43,19 @@ type Neighbour struct {
 // because a human asserted it. Narrowing a traversal is done explicitly with
 // Galaxies.
 type NeighbourOpts struct {
-	Depth      int       // hops, default 1
-	Direction  Direction // default Both
-	EdgeTypes  []string  // keep only these relation types; empty keeps all
-	Galaxies   []string  // keep only entries from these galaxy types; empty keeps all
+	Depth     int       // hops, default 1
+	Direction Direction // default Both
+	EdgeTypes []string  // keep only these relation types; empty keeps all
+	Galaxies  []string  // keep only entries from these galaxy types; empty keeps all
 
 	// MaxGroupCount drops entries linked to more than this many threat actors:
 	// the generic behaviours every group shares, which therefore distinguish
 	// none of them. Unlike Galaxies, this blocks traversal as well as reporting.
 	MaxGroupCount int
 
-	Limit      int       // max nodes returned, default 200
-	WithPaths  bool      // record the route to each node
-	SkipGhosts bool      // drop dangling nodes from the result
+	Limit      int  // max nodes returned, default 200
+	WithPaths  bool // record the route to each node
+	SkipGhosts bool // drop dangling nodes from the result
 }
 
 // GenericThreshold is where an entry stops being a usable signature: linked to
