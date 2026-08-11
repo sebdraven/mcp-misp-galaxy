@@ -45,7 +45,7 @@ func (h *handlers) resolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	group := q.Get("group") == "1" || q.Get("group") == "true"
-	res, err := h.s.Resolve(name, csv(q.Get("galaxy")), intParam(r, "limit", 0), group)
+	res, err := h.s.Resolve(name, csv(q.Get("galaxy")), intParam(r, "limit", 0), group, q.Get("normalisation"))
 	respond(w, res, err)
 }
 
