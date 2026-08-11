@@ -2,6 +2,7 @@ package galaxy
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -662,6 +663,71 @@ func TestUnattributedRanksAfterAttributed(t *testing.T) {
 	}
 	if order[0] != "t-exclusive" || order[1] != "t-shared" || order[2] != "t-orphan" {
 		t.Errorf("want exclusive, shared, then the unattributed entry; got %v", order)
+	}
+}
+
+func TestGenericThresholdIsPerGalaxy(t *testing.T) {
+	// A fixed cut-off cannot serve galaxies whose distributions differ by an
+	// order of magnitude. Here one galaxy tops out at 3 actors and the other at
+	// 40; the same number cannot mean "generic" in both.
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// 12 actors, so a 90th percentile lands meaningfully.
+	var actors []map[string]any
+	for i := 0; i < 12; i++ {
+		rel := []map[string]any{{"dest-uuid": "busy", "type": "uses"}}
+		if i < 3 {
+			rel = append(rel, map[string]any{"dest-uuid": "quiet", "type": "uses"})
+		}
+		actors = append(actors, map[string]any{
+			"value": fmt.Sprintf("Actor %d", i),
+			"uuid":  fmt.Sprintf("a-%d", i),
+			"related": rel,
+		})
+	}
+	writeCluster(t, clusters, "threat-actor", actors)
+	writeCluster(t, clusters, "mitre-attack-pattern", []map[string]any{
+		{"value": "Busy", "uuid": "busy"},
+		{"value": "Quiet", "uuid": "quiet"},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	busy, _ := g.Node("busy")
+	quiet, _ := g.Node("quiet")
+	if busy.GroupCount != 12 || quiet.GroupCount != 3 {
+		t.Fatalf("fixture broken: busy=%d quiet=%d, want 12 and 3", busy.GroupCount, quiet.GroupCount)
+	}
+
+	threshold, ok := g.GenericThreshold("mitre-attack-pattern")
+	if !ok {
+		t.Fatal("expected a derived threshold for the galaxy")
+	}
+	if threshold < quiet.GroupCount || threshold >= busy.GroupCount {
+		t.Errorf("threshold %d should sit between the two, got quiet=%d busy=%d",
+			threshold, quiet.GroupCount, busy.GroupCount)
+	}
+
+	found := g.Neighbours("a-0", NeighbourOpts{Depth: 1})
+	byUUID := map[string]Neighbour{}
+	for _, n := range found {
+		byUUID[n.UUID] = n
+	}
+	if !byUUID["busy"].Generic {
+		t.Error("the entry every actor uses should be flagged generic")
+	}
+	if byUUID["quiet"].Generic {
+		t.Error("the entry three actors use should not be flagged generic")
+	}
+	if byUUID["busy"].GenericThreshold != threshold {
+		t.Errorf("the threshold an entry was judged against must be reported, got %d",
+			byUUID["busy"].GenericThreshold)
 	}
 }
 
