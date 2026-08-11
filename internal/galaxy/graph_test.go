@@ -986,6 +986,74 @@ func TestMostGenericRanksWorstFirst(t *testing.T) {
 	}
 }
 
+// ---- normalisation ----------------------------------------------------------
+
+func TestAggressiveNormalisationStripsDecoration(t *testing.T) {
+	cases := []struct {
+		in, want string
+		why      string
+	}{
+		{"LightSpy - S1185", "lightspy", "MITRE software id"},
+		{"APT28 - G0096", "apt28", "MITRE group id"},
+		{"win.icefog", "icefog", "platform prefix"},
+		{"apk.dragonegg", "dragonegg", "platform prefix"},
+		{"Earth Preta (Trendmicro)", "earthpreta", "vendor suffix"},
+		{"The Gorgon Group", "gorgon", "leading the, collective suffix"},
+		{"Callisto Group", "callisto", "collective suffix"},
+		{"APT-28", "apt28", "punctuation, as in standard"},
+	}
+	for _, c := range cases {
+		if got := normaliseAggressive(c.in); got != c.want {
+			t.Errorf("normaliseAggressive(%q) = %q, want %q (%s)", c.in, got, c.want, c.why)
+		}
+	}
+}
+
+func TestAggressiveNormalisationKeepsBareWords(t *testing.T) {
+	// Stripping must not empty a name that IS the decoration: "Group" and
+	// "win" are legitimate values somewhere in a corpus this size.
+	for _, in := range []string{"Group", "win", "APT"} {
+		if got := normaliseAggressive(in); got == "" {
+			t.Errorf("normaliseAggressive(%q) emptied the name", in)
+		}
+	}
+}
+
+func TestResolveNormalisationModes(t *testing.T) {
+	// The point of keeping both: the same query must reach an entry under
+	// aggressive folding that standard folding cannot see.
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters, "malpedia", []map[string]any{
+		{"value": "win.icefog", "uuid": "m-icefog"},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got := g.ResolveWith("Icefog", nil, 10, Standard); len(got) != 0 {
+		// Standard keeps the platform prefix, so the bare name is a substring
+		// match at best — never an exact one.
+		for _, c := range got {
+			if c.Reason == MatchValue {
+				t.Errorf("standard folding should not match win.icefog exactly, got %+v", c)
+			}
+		}
+	}
+
+	got := g.ResolveWith("Icefog", nil, 10, Aggressive)
+	if len(got) != 1 || got[0].UUID != "m-icefog" {
+		t.Fatalf("aggressive folding should match the platform-qualified name, got %+v", got)
+	}
+	if got[0].Reason != MatchValue {
+		t.Errorf("expected an exact match under aggressive folding, got %q", got[0].Reason)
+	}
+}
+
 // ---- traversal --------------------------------------------------------------
 
 func TestNeighboursFollowsRelationBackwards(t *testing.T) {
