@@ -1046,8 +1046,8 @@ func TestAggressiveNormalisationStripsMitreTechniqueIDs(t *testing.T) {
 	// Techniques carry T-prefixed ids with a sub-technique part, and they are
 	// the bulk of the corpus's MITRE entries.
 	cases := map[string]string{
-		"PowerShell - T1059.001": "powershell",
-		"Audio Capture - T1123":  "audiocapture",
+		"PowerShell - T1059.001":     "powershell",
+		"Audio Capture - T1123":      "audiocapture",
 		"Malicious File - T1204.002": "maliciousfile",
 	}
 	for in, want := range cases {
