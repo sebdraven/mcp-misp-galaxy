@@ -84,14 +84,20 @@ type nodeInput struct {
 }
 
 type neighboursInput struct {
-	UUID         string   `json:"uuid" jsonschema:"starting entry UUID"`
-	Depth        int      `json:"depth,omitempty" jsonschema:"hops to walk (default 1); 2 already spans malware to actor to report"`
-	Direction    string   `json:"direction,omitempty" jsonschema:"both (default), out or in"`
-	Types        []string `json:"types,omitempty" jsonschema:"keep only these relation types, e.g. similar, used-by, subtechnique-of"`
-	Galaxies     []string `json:"galaxies,omitempty" jsonschema:"keep only entries from these galaxy types, e.g. ['references'] for documenting reports, ['malpedia'] for malware families"`
-	Limit        int      `json:"limit,omitempty" jsonschema:"max entries returned (default 200)"`
-	WithPaths    bool     `json:"with_paths,omitempty" jsonschema:"include the route taken to reach each entry"`
-	SkipDangling bool     `json:"skip_dangling,omitempty" jsonschema:"drop entries referenced by a relation but not defined in this checkout"`
+	UUID          string   `json:"uuid" jsonschema:"starting entry UUID"`
+	Depth         int      `json:"depth,omitempty" jsonschema:"hops to walk (default 1); 2 already spans malware to actor to report"`
+	Direction     string   `json:"direction,omitempty" jsonschema:"both (default), out or in"`
+	Types         []string `json:"types,omitempty" jsonschema:"keep only these relation types, e.g. similar, used-by, subtechnique-of"`
+	Galaxies      []string `json:"galaxies,omitempty" jsonschema:"keep only entries from these galaxy types, e.g. ['references'] for documenting reports, ['malpedia'] for malware families"`
+	MaxGroupCount int      `json:"max_group_count,omitempty" jsonschema:"drop entries linked to more than this many threat actors, and do not walk through them. Use it to strip the generic behaviours every group shares; 10 is a reasonable starting point"`
+	Limit         int      `json:"limit,omitempty" jsonschema:"max entries returned (default 200)"`
+	WithPaths     bool     `json:"with_paths,omitempty" jsonschema:"include the route taken to reach each entry"`
+	SkipDangling  bool     `json:"skip_dangling,omitempty" jsonschema:"drop entries referenced by a relation but not defined in this checkout"`
+}
+
+type genericInput struct {
+	Galaxy string `json:"galaxy,omitempty" jsonschema:"restrict to one galaxy type, e.g. mitre-attack-pattern or tool; omit to look across the whole corpus"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"how many entries to return (default 10)"`
 }
 
 type pathInput struct {
@@ -124,14 +130,20 @@ func (r *registry) neighbours(ctx context.Context, _ *mcp.CallToolRequest, in ne
 		return nil, service.NeighboursResult{}, fmt.Errorf("uuid is required")
 	}
 	res, err := r.svc.Neighbours(in.UUID, galaxy.NeighbourOpts{
-		Depth:      in.Depth,
-		Direction:  galaxy.Direction(in.Direction),
-		EdgeTypes:  in.Types,
-		Galaxies:   in.Galaxies,
-		Limit:      in.Limit,
-		WithPaths:  in.WithPaths,
-		SkipGhosts: in.SkipDangling,
+		Depth:         in.Depth,
+		Direction:     galaxy.Direction(in.Direction),
+		EdgeTypes:     in.Types,
+		Galaxies:      in.Galaxies,
+		MaxGroupCount: in.MaxGroupCount,
+		Limit:         in.Limit,
+		WithPaths:     in.WithPaths,
+		SkipGhosts:    in.SkipDangling,
 	})
+	return nil, res, err
+}
+
+func (r *registry) generic(ctx context.Context, _ *mcp.CallToolRequest, in genericInput) (*mcp.CallToolResult, service.GenericResult, error) {
+	res, err := r.svc.MostGeneric(in.Galaxy, in.Limit)
 	return nil, res, err
 }
 
