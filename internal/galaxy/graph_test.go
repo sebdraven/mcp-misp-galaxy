@@ -1019,6 +1019,44 @@ func TestAggressiveNormalisationKeepsBareWords(t *testing.T) {
 	}
 }
 
+func TestAggressiveNormalisationRespectsWordBoundaries(t *testing.T) {
+	// The failure mode this guards against is silent: a prefix or suffix
+	// stripped without a delimiter mangles ordinary names, and nothing
+	// downstream shows that the key was mangled.
+	cases := []struct {
+		in, want string
+		why      string
+	}{
+		{"Window", "window", "begins with win but is not qualified"},
+		{"Winnti", "winnti", "begins with win"},
+		{"Adapt", "adapt", "ends in apt but is not a collective suffix"},
+		{"Elfin", "elfin", "begins with elf"},
+		{"Pyramid", "pyramid", "begins with py"},
+		{"Teamviewer", "teamviewer", "contains team, not as a suffix"},
+		{"Crewmate", "crewmate", "begins with crew"},
+	}
+	for _, c := range cases {
+		if got := normaliseAggressive(c.in); got != c.want {
+			t.Errorf("normaliseAggressive(%q) = %q, want %q (%s)", c.in, got, c.want, c.why)
+		}
+	}
+}
+
+func TestAggressiveNormalisationStripsMitreTechniqueIDs(t *testing.T) {
+	// Techniques carry T-prefixed ids with a sub-technique part, and they are
+	// the bulk of the corpus's MITRE entries.
+	cases := map[string]string{
+		"PowerShell - T1059.001": "powershell",
+		"Audio Capture - T1123":  "audiocapture",
+		"Malicious File - T1204.002": "maliciousfile",
+	}
+	for in, want := range cases {
+		if got := normaliseAggressive(in); got != want {
+			t.Errorf("normaliseAggressive(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestResolveNormalisationModes(t *testing.T) {
 	// The point of keeping both: the same query must reach an entry under
 	// aggressive folding that standard folding cannot see.
