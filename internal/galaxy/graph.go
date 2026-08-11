@@ -393,6 +393,14 @@ func (g *Graph) MostGeneric(galaxyType string, limit int) []GenericEntry {
 // reported alongside the flag rather than left implicit.
 const GenericPercentile = 0.90
 
+// minGenericSample is how many attributed entries a galaxy needs before a
+// percentile means anything. Below it, the fixed fallback applies.
+//
+// A 90th percentile over three values is the third value — it describes that
+// handful of entries, not a distribution, and would label as generic whatever
+// happens to sit at the top of a nearly empty galaxy.
+const minGenericSample = 10
+
 // genericThresholds computes, per galaxy, the group_count above which an entry
 // counts as generic.
 //
@@ -412,6 +420,9 @@ func (g *Graph) genericThresholds() map[string]int {
 
 	out := make(map[string]int, len(counts))
 	for galaxyType, values := range counts {
+		if len(values) < minGenericSample {
+			continue // too few entries for a percentile to describe anything
+		}
 		sort.Ints(values)
 		idx := int(float64(len(values)) * GenericPercentile)
 		if idx >= len(values) {
