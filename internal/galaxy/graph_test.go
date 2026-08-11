@@ -816,6 +816,55 @@ func TestLimitAppliesAfterRanking(t *testing.T) {
 	}
 }
 
+func TestTraversalIsBounded(t *testing.T) {
+	// Ranking before truncation means Limit no longer bounds the work, so the
+	// caps have to. Without them, a small limit at depth 3 from a hub would
+	// still walk a large share of the corpus.
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// A chain long enough to outrun MaxDepth.
+	var values []map[string]any
+	for i := 0; i < 12; i++ {
+		v := map[string]any{
+			"value": fmt.Sprintf("Node %02d", i),
+			"uuid":  fmt.Sprintf("n-%02d", i),
+		}
+		if i < 11 {
+			v["related"] = []map[string]any{
+				{"dest-uuid": fmt.Sprintf("n-%02d", i+1), "type": "rel"},
+			}
+		}
+		values = append(values, v)
+	}
+	writeCluster(t, clusters, "mitre-malware", values)
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	// Depth is clamped, so an absurd request cannot walk the whole chain.
+	deep := g.Neighbours("n-00", NeighbourOpts{Depth: 99, Limit: 100})
+	if len(deep) != MaxDepth {
+		t.Errorf("depth should be clamped to %d hops, reached %d nodes", MaxDepth, len(deep))
+	}
+
+	// And an explicit visit cap stops the walk early.
+	capped := g.Neighbours("n-00", NeighbourOpts{Depth: 4, Limit: 100, MaxVisited: 2})
+	if len(capped) >= MaxDepth {
+		t.Errorf("MaxVisited should cut the walk short, got %d results", len(capped))
+	}
+
+	// Path search is clamped too.
+	if hops := g.ShortestPath("n-00", "n-11", 99, nil); hops != nil {
+		t.Errorf("a route 11 hops away must not be found under a %d-hop cap, got %d hops",
+			MaxPathDepth, len(hops)-1)
+	}
+}
+
 func TestActorNeighboursAreNotDemoted(t *testing.T) {
 	// Actors carry group_count 0 by construction, since they are not counted
 	// against themselves. Treating that as "unattributed" would bury the actors
