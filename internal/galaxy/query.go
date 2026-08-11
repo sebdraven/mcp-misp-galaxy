@@ -59,9 +59,13 @@ type NeighbourOpts struct {
 	SkipGhosts bool // drop dangling nodes from the result
 }
 
-// GenericThreshold is the fixed fallback used when a galaxy has too few
-// attributed entries to derive one from its own distribution.
-const GenericThreshold = 10
+// GenericFallbackThreshold applies to galaxies with too few attributed entries
+// to derive one from their own distribution.
+//
+// 9 rather than 10 because the comparison is strict: an entry linked to 10
+// actors is generic, which is the cut-off this replaced. Getting that boundary
+// wrong would silently reclassify entries at exactly the old threshold.
+const GenericFallbackThreshold = 9
 
 // neighbourRank orders neighbours by what they are, before how specific they
 // are.
@@ -150,7 +154,7 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 			}
 			threshold, ok := g.GenericThreshold(e.To.Galaxy)
 			if !ok {
-				threshold = GenericThreshold
+				threshold = GenericFallbackThreshold
 			}
 			n := Neighbour{
 				UUID: e.To.UUID, Tag: e.To.Tag(), Value: e.To.Value, Galaxy: e.To.Galaxy,
