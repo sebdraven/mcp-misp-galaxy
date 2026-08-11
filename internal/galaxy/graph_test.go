@@ -606,24 +606,31 @@ func TestUnattributedRanksAfterAttributed(t *testing.T) {
 	// uninformative one. Ranking it first would present a gap in the data as
 	// the strongest signal on the page — the exact mechanism by which
 	// under-reporting turns into false attribution.
+	//
+	// The unattributed entry has to be reached from something that is NOT an
+	// actor, or countGroups would credit it with one. Here the malware is the
+	// origin, and t-orphan hangs off it alone.
 	root := t.TempDir()
 	clusters := filepath.Join(root, "clusters")
 	if err := os.MkdirAll(clusters, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
+	writeCluster(t, clusters, "mitre-malware", []map[string]any{
+		{"value": "Family", "uuid": "m-1", "related": []map[string]any{
+			{"dest-uuid": "t-exclusive", "type": "uses"},
+			{"dest-uuid": "t-orphan", "type": "uses"},
+			{"dest-uuid": "t-shared", "type": "uses"},
+		}},
+	})
 	writeCluster(t, clusters, "threat-actor", []map[string]any{
 		{"value": "Actor One", "uuid": "a-1", "related": []map[string]any{
 			{"dest-uuid": "t-exclusive", "type": "uses"},
-			{"dest-uuid": "t-orphan", "type": "uses"},
 			{"dest-uuid": "t-shared", "type": "uses"},
 		}},
 		{"value": "Actor Two", "uuid": "a-2", "related": []map[string]any{
 			{"dest-uuid": "t-shared", "type": "uses"},
 		}},
 	})
-	// t-orphan is reached from the actor but the loader records no actor on it
-	// because the edge is declared the other way and it sits in a galaxy that
-	// is not an actor galaxy; what matters here is that its count is 0.
 	writeCluster(t, clusters, "mitre-attack-pattern", []map[string]any{
 		{"value": "Exclusive", "uuid": "t-exclusive"},
 		{"value": "Shared", "uuid": "t-shared"},
@@ -634,7 +641,18 @@ func TestUnattributedRanksAfterAttributed(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	found := g.Neighbours("a-1", NeighbourOpts{Depth: 1})
+	// The fixture only tests anything if it really produces 1, 2 and 0.
+	for uuid, want := range map[string]int{"t-exclusive": 1, "t-shared": 2, "t-orphan": 0} {
+		n, ok := g.Node(uuid)
+		if !ok {
+			t.Fatalf("%s missing from the graph", uuid)
+		}
+		if n.GroupCount != want {
+			t.Fatalf("fixture broken: %s has group_count %d, want %d", uuid, n.GroupCount, want)
+		}
+	}
+
+	found := g.Neighbours("m-1", NeighbourOpts{Depth: 1})
 	var order []string
 	for _, n := range found {
 		order = append(order, n.UUID)
@@ -642,10 +660,51 @@ func TestUnattributedRanksAfterAttributed(t *testing.T) {
 	if len(order) != 3 {
 		t.Fatalf("expected three neighbours, got %v", order)
 	}
-	// Exclusive (1 actor) first, shared (2 actors) next, and only then the
-	// entry nobody is linked to.
-	if order[0] != "t-exclusive" || order[1] != "t-shared" {
-		t.Errorf("attributed entries must lead, got %v", order)
+	if order[0] != "t-exclusive" || order[1] != "t-shared" || order[2] != "t-orphan" {
+		t.Errorf("want exclusive, shared, then the unattributed entry; got %v", order)
+	}
+}
+
+func TestActorNeighboursAreNotDemoted(t *testing.T) {
+	// Actors carry group_count 0 by construction, since they are not counted
+	// against themselves. Treating that as "unattributed" would bury the actors
+	// at the bottom of a walk from a malware — which is the one thing such a
+	// walk is usually looking for.
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters, "mitre-malware", []map[string]any{
+		{"value": "Family", "uuid": "m-1", "related": []map[string]any{
+			{"dest-uuid": "t-orphan", "type": "uses"},
+		}},
+	})
+	writeCluster(t, clusters, "threat-actor", []map[string]any{
+		{"value": "The Actor", "uuid": "a-1", "related": []map[string]any{
+			{"dest-uuid": "m-1", "type": "uses"},
+		}},
+	})
+	writeCluster(t, clusters, "mitre-attack-pattern", []map[string]any{
+		{"value": "Orphan", "uuid": "t-orphan"},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	actor, _ := g.Node("a-1")
+	if actor.GroupCount != 0 {
+		t.Fatalf("fixture broken: the actor should carry group_count 0, got %d", actor.GroupCount)
+	}
+
+	found := g.Neighbours("m-1", NeighbourOpts{Depth: 1})
+	if len(found) != 2 {
+		t.Fatalf("expected the actor and the technique, got %+v", found)
+	}
+	if found[0].UUID != "a-1" {
+		t.Errorf("the actor must not be demoted for having no group count, got %v",
+			[]string{found[0].UUID, found[1].UUID})
 	}
 }
 
