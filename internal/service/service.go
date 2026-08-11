@@ -138,17 +138,18 @@ func (s *Service) graph() (*galaxy.Graph, error) {
 
 // ResolveResult carries the ranked candidates for a name.
 type ResolveResult struct {
-	Query      string                  `json:"query"`
-	Scope      []string                `json:"scope,omitempty" jsonschema:"galaxies actually searched; absent means the whole corpus"`
-	Count      int                     `json:"count"`
-	Ambiguous  bool                    `json:"ambiguous" jsonschema:"more than one candidate matched; do not treat the first as the answer without checking"`
-	Candidates []galaxy.Candidate      `json:"candidates"`
-	ByGalaxy   []galaxy.CandidateGroup `json:"by_galaxy,omitempty" jsonschema:"the same candidates grouped by galaxy, largest group first"`
+	Query         string                  `json:"query"`
+	Normalisation string                  `json:"normalisation" jsonschema:"which name-folding was used: standard or aggressive"`
+	Scope         []string                `json:"scope,omitempty" jsonschema:"galaxies actually searched; absent means the whole corpus"`
+	Count         int                     `json:"count"`
+	Ambiguous     bool                    `json:"ambiguous" jsonschema:"more than one candidate matched; do not treat the first as the answer without checking"`
+	Candidates    []galaxy.Candidate      `json:"candidates"`
+	ByGalaxy      []galaxy.CandidateGroup `json:"by_galaxy,omitempty" jsonschema:"the same candidates grouped by galaxy, largest group first"`
 }
 
 // Resolve ranks the entries matching a name. galaxies overrides the service
 // scope for this call; pass ScopeAll to search everything.
-func (s *Service) Resolve(q string, galaxies []string, limit int, group bool) (ResolveResult, error) {
+func (s *Service) Resolve(q string, galaxies []string, limit int, group bool, normalisation string) (ResolveResult, error) {
 	g, err := s.graph()
 	if err != nil {
 		return ResolveResult{}, err
@@ -157,13 +158,18 @@ func (s *Service) Resolve(q string, galaxies []string, limit int, group bool) (R
 	if len(galaxies) > 0 {
 		scope = normaliseScope(galaxies)
 	}
-	cands := g.Resolve(q, scope, limit)
+	mode := galaxy.Standard
+	if strings.EqualFold(normalisation, string(galaxy.Aggressive)) {
+		mode = galaxy.Aggressive
+	}
+	cands := g.ResolveWith(q, scope, limit, mode)
 	res := ResolveResult{
-		Query:      q,
-		Scope:      scope,
-		Count:      len(cands),
-		Ambiguous:  len(cands) > 1,
-		Candidates: cands,
+		Query:         q,
+		Normalisation: string(mode),
+		Scope:         scope,
+		Count:         len(cands),
+		Ambiguous:     len(cands) > 1,
+		Candidates:    cands,
 	}
 	if group {
 		res.ByGalaxy = galaxy.GroupByGalaxy(cands)
