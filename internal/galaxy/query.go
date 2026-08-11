@@ -57,7 +57,36 @@ type NeighbourOpts struct {
 	Limit      int  // max nodes returned, default 200
 	WithPaths  bool // record the route to each node
 	SkipGhosts bool // drop dangling nodes from the result
+
+	// MaxVisited caps how many nodes the walk may expand, independently of how
+	// many it returns. Default MaxVisitedDefault.
+	//
+	// Ranking before truncation means Limit no longer bounds the work done, so
+	// something else has to: at depth 3 from a hub, an unbounded walk reaches a
+	// large share of the corpus regardless of how few results were asked for.
+	MaxVisited int
 }
+
+// MaxVisitedDefault bounds traversal work when the caller sets no cap.
+//
+// Sized to cover any realistic neighbourhood — the busiest entries in the
+// corpus have a few hundred relations, and two hops from one stay well under
+// this — while stopping a depth-4 walk from touching the whole graph.
+const MaxVisitedDefault = 20000
+
+// MaxDepth caps how far a traversal may walk, whatever the caller asks for.
+//
+// Beyond four hops the result stops being an answer: on a graph with hubs this
+// dense, almost everything reaches almost everything, and a path that long
+// supports no claim about either end. The cap is as much about the meaning of
+// the output as about the cost of producing it.
+const MaxDepth = 4
+
+// MaxPathDepth caps a path search. Higher than MaxDepth because a
+// bidirectional search expands from both ends, so six hops costs about what
+// three do from one side — and because "what connects these two" is a question
+// worth a few more hops than "what is near this one".
+const MaxPathDepth = 6
 
 // GenericFallbackThreshold applies to galaxies with too few attributed entries
 // to derive one from their own distribution.
@@ -94,6 +123,18 @@ func neighbourRank(n Neighbour) int {
 
 // Neighbours walks outward from a node, breadth first, and returns what it
 // reached. Nodes are reported at the shallowest depth they were found at.
+//
+// The whole neighbourhood is collected, ranked, and only then cut to Limit.
+// Stopping the walk at Limit instead would let arrival order decide what the
+// caller sees, and the ranking could only reorder whichever entries happened
+// to be reached first — so a walk from a malware could miss the actor using
+// it entirely while appearing to show "the most relevant" results.
+//
+// Work is bounded by MaxVisited rather than by Limit, since the two are
+// different concerns: how much of the graph may be explored, and how much of
+// what was found gets returned. When the cap is hit the walk stops early and
+// the ranking applies to what was reached, so results stay ordered but may be
+// incomplete.
 func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 	start, ok := g.nodes[uuid]
 	if !ok {
@@ -104,6 +145,12 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 	}
 	if opt.Limit <= 0 {
 		opt.Limit = 200
+	}
+	if opt.MaxVisited <= 0 {
+		opt.MaxVisited = MaxVisitedDefault
+	}
+	if opt.Depth > MaxDepth {
+		opt.Depth = MaxDepth
 	}
 	if opt.Direction == "" {
 		opt.Direction = Both
@@ -120,7 +167,7 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 	queue := []entry{{node: start, depth: 0, path: []string{start.UUID}}}
 	var out []Neighbour
 
-	for len(queue) > 0 && len(out) < opt.Limit {
+	for len(queue) > 0 && len(visited) < opt.MaxVisited {
 		cur := queue[0]
 		queue = queue[1:]
 		if cur.depth == opt.Depth {
@@ -169,9 +216,6 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 				n.Path = path
 			}
 			out = append(out, n)
-			if len(out) >= opt.Limit {
-				break
-			}
 		}
 	}
 
@@ -192,6 +236,10 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 		}
 		return out[i].Value < out[j].Value
 	})
+
+	if len(out) > opt.Limit {
+		out = out[:opt.Limit]
+	}
 	return out
 }
 
@@ -224,6 +272,9 @@ func (g *Graph) ShortestPath(fromUUID, toUUID string, maxDepth int, edgeTypes []
 	}
 	if maxDepth <= 0 {
 		maxDepth = 6
+	}
+	if maxDepth > MaxPathDepth {
+		maxDepth = MaxPathDepth
 	}
 	keep := edgeFilter(edgeTypes)
 
