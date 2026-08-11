@@ -149,8 +149,17 @@ func (g *Graph) Neighbours(uuid string, opt NeighbourOpts) []Neighbour {
 		if out[i].Depth != out[j].Depth {
 			return out[i].Depth < out[j].Depth
 		}
-		// Specific before generic: what distinguishes this entry should be read
-		// first, and what every group shares should sink to the bottom.
+		// Attributed entries before unattributed ones. A count of 0 is not the
+		// most specific case, it is the *uninformative* one: nobody is recorded
+		// as using it, which supports no conclusion at all. Sorting purely
+		// ascending would put those first and dress a gap in the data as the
+		// strongest signal on the page — which is precisely how
+		// under-reporting turns into false attribution.
+		zi, zj := out[i].GroupCount == 0, out[j].GroupCount == 0
+		if zi != zj {
+			return zj
+		}
+		// Among attributed entries, fewer actors means more discriminating.
 		if out[i].GroupCount != out[j].GroupCount {
 			return out[i].GroupCount < out[j].GroupCount
 		}
