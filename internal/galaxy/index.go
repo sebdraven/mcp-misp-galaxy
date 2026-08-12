@@ -124,22 +124,28 @@ func normalise(s string) string {
 // delimiter is the only thing that says a prefix is a qualifier rather than
 // the first letters of a name.
 func normaliseAggressive(s string) string {
+	// Strip only if something remains: a name that IS the decoration keeps it.
+	// A value folding to the empty key would not be rejected, it would simply
+	// never be added to the aggressive index — present under standard folding,
+	// absent under aggressive, with nothing saying so.
+	strip := func(s string, re *regexp.Regexp) string {
+		if out := re.ReplaceAllString(s, ""); strings.TrimSpace(out) != "" {
+			return out
+		}
+		return s
+	}
+
 	s = strings.TrimSpace(s)
-	s = mitreSuffix.ReplaceAllString(s, "")
-	s = vendorSuffix.ReplaceAllString(s, "")
+	s = strip(s, mitreSuffix)
+	s = strip(s, vendorSuffix)
 	s = strings.TrimSpace(s)
 
-	if lower := strings.ToLower(s); strings.HasPrefix(lower, "the ") {
+	if lower := strings.ToLower(s); strings.HasPrefix(lower, "the ") && strings.TrimSpace(s[4:]) != "" {
 		s = s[4:]
 	}
 
-	// Strip only if something remains: a name that IS the decoration keeps it.
-	if stripped := platformPrefixPattern.ReplaceAllString(s, ""); strings.TrimSpace(stripped) != "" {
-		s = stripped
-	}
-	if stripped := collectiveSuffixPattern.ReplaceAllString(s, ""); strings.TrimSpace(stripped) != "" {
-		s = stripped
-	}
+	s = strip(s, platformPrefixPattern)
+	s = strip(s, collectiveSuffixPattern)
 	return normalise(s)
 }
 
