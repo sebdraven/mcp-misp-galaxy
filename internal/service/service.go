@@ -22,6 +22,14 @@ var ErrNotLoaded = errors.New("galaxy corpus not loaded")
 // ErrUnknownNode is returned for a UUID absent from the graph.
 var ErrUnknownNode = errors.New("unknown uuid")
 
+// ErrUnknownNormalisation is returned for a normalisation that is neither
+// standard nor aggressive.
+//
+// Rejected rather than defaulted: a misspelt "agressive" silently answering
+// under standard folding looks exactly like an aggressive resolve that found
+// nothing extra, which is the one conclusion this parameter exists to test.
+var ErrUnknownNormalisation = errors.New("unknown normalisation: want standard or aggressive")
+
 // DefaultScope is the set of galaxies searched when none is specified.
 //
 // It exists because misp-galaxy is no longer a threat-intelligence corpus: it
@@ -136,6 +144,18 @@ func (s *Service) graph() (*galaxy.Graph, error) {
 
 // ---- queries ----------------------------------------------------------------
 
+// parseNormalisation maps the wire value to a mode. Empty means the default.
+func parseNormalisation(s string) (galaxy.Normalisation, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", string(galaxy.Standard):
+		return galaxy.Standard, nil
+	case string(galaxy.Aggressive):
+		return galaxy.Aggressive, nil
+	default:
+		return "", fmt.Errorf("%w: %q", ErrUnknownNormalisation, s)
+	}
+}
+
 // ResolveResult carries the ranked candidates for a name.
 type ResolveResult struct {
 	Query         string                  `json:"query"`
@@ -158,9 +178,9 @@ func (s *Service) Resolve(q string, galaxies []string, limit int, group bool, no
 	if len(galaxies) > 0 {
 		scope = normaliseScope(galaxies)
 	}
-	mode := galaxy.Standard
-	if strings.EqualFold(normalisation, string(galaxy.Aggressive)) {
-		mode = galaxy.Aggressive
+	mode, err := parseNormalisation(normalisation)
+	if err != nil {
+		return ResolveResult{}, err
 	}
 	cands := g.ResolveWith(q, scope, limit, mode)
 	res := ResolveResult{

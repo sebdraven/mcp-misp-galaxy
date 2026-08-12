@@ -118,6 +118,8 @@ func respond(w http.ResponseWriter, payload any, err error) {
 		writeJSON(w, http.StatusOK, payload)
 	case errors.Is(err, service.ErrUnknownNode):
 		fail(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, service.ErrUnknownNormalisation):
+		fail(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrNotLoaded):
 		// Distinct from a plain 500: the service is up, the corpus is not
 		// ready yet. Retrying later is the right response.
