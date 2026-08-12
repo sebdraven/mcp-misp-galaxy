@@ -63,6 +63,14 @@ func Register(s *mcp.Server, svc *service.Service) {
 	}, r.galaxies)
 
 	mcp.AddTool(s, &mcp.Tool{
+		Name: "gx_refs",
+		Description: "List the reports documenting a galaxy entry, by UUID. " +
+			"References are NOT reachable through gx_neighbors: they live in the entry's metadata, and although a 'references' galaxy exists nothing links to it, so no traversal ever finds a report. Use this instead. " +
+			"Also returns a per-publisher count — an entry described by one vendor is a single point of view, one described by several has been looked at independently. " +
+			"Links back to the entry's own catalogue page are flagged 'self_referential' and sorted last; they are records, not analyses.",
+	}, r.refs)
+
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "gx_generic",
 		Description: "List the entries used by the most threat actors — the ones with the least attribution value. " +
 			"Read this before drawing conclusions from a list of relations: a technique or tool shared by dozens of actors says nothing about who was behind an intrusion, " +
@@ -148,6 +156,14 @@ func (r *registry) neighbours(ctx context.Context, _ *mcp.CallToolRequest, in ne
 		WithPaths:     in.WithPaths,
 		SkipGhosts:    in.SkipDangling,
 	})
+	return nil, res, err
+}
+
+func (r *registry) refs(ctx context.Context, _ *mcp.CallToolRequest, in nodeInput) (*mcp.CallToolResult, service.RefsResult, error) {
+	if strings.TrimSpace(in.UUID) == "" {
+		return nil, service.RefsResult{}, fmt.Errorf("uuid is required")
+	}
+	res, err := r.svc.Refs(in.UUID)
 	return nil, res, err
 }
 
