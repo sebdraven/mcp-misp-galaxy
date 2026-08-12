@@ -124,6 +124,61 @@ func TestProfileNotesAbsenceOfAnySpecificEntry(t *testing.T) {
 	}
 }
 
+func TestProfileSeparatesDanglingFromUnattributed(t *testing.T) {
+	// Three kinds of absence, and the profile has to keep them apart:
+	//   specific     one actor — evidence
+	//   unattributed defined here, no actor recorded — a gap in the corpus
+	//   dangling     not defined here at all — usually a missing galaxy
+	//
+	// A dangling node carries group_count 0 like an unattributed one, so
+	// counting on that alone folds "we have no entry" into "nobody uses it".
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters, "mitre-malware", []map[string]any{
+		{"value": "Family", "uuid": "m-1", "related": []map[string]any{
+			{"dest-uuid": "t-here", "type": "uses"},
+			{"dest-uuid": "t-missing", "type": "uses"},
+		}},
+	})
+	writeCluster(t, clusters, "mitre-attack-pattern", []map[string]any{
+		{"value": "Defined But Unused", "uuid": "t-here"},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	missing, ok := g.Node("t-missing")
+	if !ok || !missing.Dangling {
+		t.Fatal("fixture broken: t-missing should be a dangling node")
+	}
+
+	p, _ := g.Profile("m-1", 1, 100)
+	if p.Dangling != 1 {
+		t.Errorf("dangling = %d, want 1", p.Dangling)
+	}
+	if p.Unattributed != 1 {
+		t.Errorf("unattributed = %d, want 1 — the dangling node must not be counted here", p.Unattributed)
+	}
+}
+
+func TestProfileReportsTruncation(t *testing.T) {
+	// The counts describe what was returned, not the whole neighbourhood. A
+	// caller reading "specific: 1" on a truncated profile would otherwise think
+	// they had seen everything.
+	g := profileGraph(t)
+	p, _ := g.Profile("m-1", 1, 1)
+	if !p.Truncated {
+		t.Error("a profile cut short by the limit should say so")
+	}
+	if full, _ := g.Profile("m-1", 1, 100); full.Truncated {
+		t.Error("a complete profile should not be flagged truncated")
+	}
+}
+
 func TestProfileUnknownUUID(t *testing.T) {
 	g := profileGraph(t)
 	if _, ok := g.Profile("nope", 1, 100); ok {
