@@ -68,13 +68,19 @@ func (h *handlers) profile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlers) cooccurrence(w http.ResponseWriter, r *http.Request) {
-	rate := 0.0
+	var minRate *float64
 	if v := r.URL.Query().Get("min_rate"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			rate = f
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			// Rejected rather than silently defaulted: a caller who asks for a
+			// threshold and gets another one back would read the result as
+			// answering the question they asked.
+			fail(w, http.StatusBadRequest, "min_rate must be a number between 0 and 1")
+			return
 		}
+		minRate = &f
 	}
-	res, err := h.s.CoOccurrence(r.PathValue("uuid"), rate, intParam(r, "limit", 0))
+	res, err := h.s.CoOccurrence(r.PathValue("uuid"), minRate, intParam(r, "limit", 0))
 	respond(w, res, err)
 }
 
@@ -142,6 +148,8 @@ func respond(w http.ResponseWriter, payload any, err error) {
 		writeJSON(w, http.StatusOK, payload)
 	case errors.Is(err, service.ErrUnknownNode):
 		fail(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, service.ErrInvalidRate):
+		fail(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrUnknownNormalisation):
 		fail(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrNotLoaded):
