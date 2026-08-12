@@ -64,6 +64,14 @@ func Register(s *mcp.Server, svc *service.Service) {
 	}, r.galaxies)
 
 	mcp.AddTool(s, &mcp.Tool{
+		Name: "gx_profile",
+		Description: "Build the profile of an entry: everything linked to it, grouped by kind, with counts of what is specific, generic and unattributed. " +
+			"This is the unit CTI attribution claims are made about — an actor's techniques and tooling, or a malware's actors and techniques — and grouping shows the shape a flat neighbour list hides. " +
+			"Read the three counts before drawing anything from it: 'specific' entries are linked to exactly one actor and could serve as a signature; 'generic' ones are shared too widely to distinguish anybody; " +
+			"'unattributed' ones have no actor at all, which is a gap in the corpus rather than exclusivity. A profile where specific is 0 supports no attribution, and the note says so.",
+	}, r.profile)
+
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "gx_refs",
 		Description: "List the reference URLs recorded on a galaxy entry — mostly vendor reports analysing it, sometimes a catalogue record. " +
 			"These are NOT reachable through gx_neighbors: they live in the entry's metadata, and although a 'references' galaxy exists nothing links to it, so no traversal ever finds one. Use this instead. " +
@@ -113,6 +121,12 @@ type neighboursInput struct {
 	SkipDangling  bool     `json:"skip_dangling,omitempty" jsonschema:"drop entries referenced by a relation but not defined in this checkout"`
 }
 
+type profileInput struct {
+	UUID  string `json:"uuid" jsonschema:"entry UUID, as returned by gx_resolve"`
+	Depth int    `json:"depth,omitempty" jsonschema:"hops to include (default 1, capped at 4). 1 is what the entry itself is linked to; 2 reaches what those are linked to in turn"`
+	Limit int    `json:"limit,omitempty" jsonschema:"max entries in the profile (default 500)"`
+}
+
 type genericInput struct {
 	Galaxy string `json:"galaxy,omitempty" jsonschema:"restrict to one galaxy type, e.g. mitre-attack-pattern or tool; omit to look across the whole corpus"`
 	Limit  int    `json:"limit,omitempty" jsonschema:"how many entries to return (default 10)"`
@@ -157,6 +171,14 @@ func (r *registry) neighbours(ctx context.Context, _ *mcp.CallToolRequest, in ne
 		WithPaths:     in.WithPaths,
 		SkipGhosts:    in.SkipDangling,
 	})
+	return nil, res, err
+}
+
+func (r *registry) profile(ctx context.Context, _ *mcp.CallToolRequest, in profileInput) (*mcp.CallToolResult, galaxy.Profile, error) {
+	if strings.TrimSpace(in.UUID) == "" {
+		return nil, galaxy.Profile{}, fmt.Errorf("uuid is required")
+	}
+	res, err := r.svc.Profile(in.UUID, in.Depth, in.Limit)
 	return nil, res, err
 }
 
