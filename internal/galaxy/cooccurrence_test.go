@@ -76,7 +76,7 @@ func TestCoOccurrenceFindsIdenticalActorSets(t *testing.T) {
 			link.GroupCount, apart.GroupCount)
 	}
 
-	pairs := g.CoOccurrence("m-1", 0.75, 10)
+	pairs := g.CoOccurrence("m-1", CoOccurrenceThreshold, 10)
 	if len(pairs) != 1 {
 		t.Fatalf("expected exactly the fully-overlapping pair, got %+v", pairs)
 	}
@@ -153,7 +153,20 @@ func TestCoOccurrenceSkipsEntriesWithNoActors(t *testing.T) {
 
 func TestCoOccurrenceUnknownUUID(t *testing.T) {
 	g := cooccurrenceGraph(t)
-	if pairs := g.CoOccurrence("nope", 0.75, 10); pairs != nil {
+	if pairs := g.CoOccurrence("nope", CoOccurrenceThreshold, 10); pairs != nil {
 		t.Errorf("expected nothing for an unknown uuid, got %+v", pairs)
+	}
+}
+
+func TestCoOccurrenceAtZeroRateReportsEveryOverlap(t *testing.T) {
+	// 0 is a legitimate threshold, not a stand-in for "use the default": it
+	// means "show every overlap". The service keeps the two apart with a
+	// pointer, and this checks the graph honours the value it is given.
+	g := cooccurrenceGraph(t)
+	all := g.CoOccurrence("m-1", 0, 50)
+	strict := g.CoOccurrence("m-1", CoOccurrenceThreshold, 50)
+	if len(all) <= len(strict) {
+		t.Errorf("a zero threshold should report more pairs than %v, got %d",
+			CoOccurrenceThreshold, len(all))
 	}
 }
