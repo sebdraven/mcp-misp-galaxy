@@ -56,19 +56,16 @@ func (g *Graph) actorsOf(n *Node) map[string]bool {
 // every pair of 55,000 nodes is quadratic, and the useful question is narrower
 // anyway — "in this profile, what am I counting twice?".
 //
-// Pairs above the threshold are not independent evidence. Two techniques used
+// Pairs at or above minRate are not independent evidence. Two techniques used
 // by the same actors tell you what one of them tells you; treating them as two
 // findings inflates a profile without adding anything to it.
+//
+// minRate and limit are taken as given: validation and defaulting belong to
+// the service layer, so both façades reject the same inputs the same way.
 func (g *Graph) CoOccurrence(uuid string, minRate float64, limit int) []CoOccurrencePair {
 	start, ok := g.nodes[uuid]
 	if !ok {
 		return nil
-	}
-	if minRate <= 0 {
-		minRate = CoOccurrenceThreshold
-	}
-	if limit <= 0 {
-		limit = 20
 	}
 
 	// Only entries with actors can co-occur: the measure is defined over
