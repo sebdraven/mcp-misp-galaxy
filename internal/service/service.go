@@ -373,6 +373,39 @@ func (s *Service) Profile(uuid string, depth, limit int) (galaxy.Profile, error)
 	return p, nil
 }
 
+// CoOccurrenceResult lists redundant pairs within an entry's neighbourhood.
+type CoOccurrenceResult struct {
+	UUID  string                    `json:"uuid"`
+	Value string                    `json:"value"`
+	Count int                       `json:"count"`
+	Pairs []galaxy.CoOccurrencePair `json:"pairs"`
+	Note  string                    `json:"note"`
+}
+
+// CoOccurrence finds pairs in an entry's neighbourhood used by nearly the same
+// actors.
+func (s *Service) CoOccurrence(uuid string, minRate float64, limit int) (CoOccurrenceResult, error) {
+	g, err := s.graph()
+	if err != nil {
+		return CoOccurrenceResult{}, err
+	}
+	n, ok := g.Node(uuid)
+	if !ok {
+		return CoOccurrenceResult{}, fmt.Errorf("%w: %s", ErrUnknownNode, uuid)
+	}
+	pairs := g.CoOccurrence(uuid, minRate, limit)
+	res := CoOccurrenceResult{
+		UUID: n.UUID, Value: n.Value,
+		Count: len(pairs), Pairs: pairs,
+	}
+	if len(pairs) > 0 {
+		res.Note = "these pairs are used by nearly the same actors: they are one observation each, not two, and counting both inflates a profile without adding to it"
+	} else {
+		res.Note = "no redundant pairs above the threshold in this neighbourhood"
+	}
+	return res, nil
+}
+
 // Galaxies lists the galaxies in the checkout.
 func (s *Service) Galaxies() ([]galaxy.GalaxyInfo, error) {
 	g, err := s.graph()
