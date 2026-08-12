@@ -130,9 +130,9 @@ type neighboursInput struct {
 }
 
 type cooccurrenceInput struct {
-	UUID    string  `json:"uuid" jsonschema:"entry whose neighbourhood to examine, as returned by gx_resolve"`
-	MinRate float64 `json:"min_rate,omitempty" jsonschema:"minimum co-occurrence rate, 0 to 1 (default 0.75). Lower it to see weaker overlaps"`
-	Limit   int     `json:"limit,omitempty" jsonschema:"max pairs to return (default 20)"`
+	UUID    string   `json:"uuid" jsonschema:"entry whose neighbourhood to examine, as returned by gx_resolve"`
+	MinRate *float64 `json:"min_rate,omitempty" jsonschema:"minimum co-occurrence rate to report, from 0 to 1. Omit for the default of 0.75; pass 0 explicitly to see every overlap, however weak"`
+	Limit   int      `json:"limit,omitempty" jsonschema:"max pairs to return (default 20)"`
 }
 
 type profileInput struct {
