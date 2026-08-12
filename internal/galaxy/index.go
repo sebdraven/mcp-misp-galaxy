@@ -83,8 +83,12 @@ var vendorSuffix = regexp.MustCompile(`\s*\([^)]*\)\s*$`)
 // would strip the start of any name that merely begins with those letters —
 // "window" would lose its "win", "iOSCheck" its "ios" — and nothing downstream
 // would reveal the mangling.
+//
+// Whitespace is NOT a separator here. Malpedia only ever writes the dotted
+// form, whereas a space is how ordinary names are built: allowing it turns
+// "Win Locker" into "locker" and "JS Sniffer" into "sniffer", silently.
 var platformPrefixPattern = regexp.MustCompile(
-	`(?i)^(win|elf|apk|osx|py|js|vbs|jar|symbian|ios)[._\-/\s]+`)
+	`(?i)^(win|elf|apk|osx|py|js|vbs|jar|symbian|ios)[._\-/]+`)
 
 // collectiveSuffixPattern matches the words taxonomies append to an actor name
 // without changing who it refers to: "Callisto" and "Callisto Group" are one

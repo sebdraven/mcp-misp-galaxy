@@ -1060,6 +1060,37 @@ func TestAggressiveNormalisationStripsMitreTechniqueIDs(t *testing.T) {
 	}
 }
 
+func TestAggressiveNormalisationKeepsSpacedPlatformWords(t *testing.T) {
+	// A platform qualifier is written with a dot in Malpedia. A space is how
+	// ordinary names are built, so treating it as a separator amputates the
+	// first word of names that have nothing to do with a platform.
+	cases := map[string]string{
+		"Win Locker":   "winlocker",
+		"JS Sniffer":   "jssniffer",
+		"IOS Implant":  "iosimplant",
+		"win.icefog":   "icefog",
+		"win/icefog":   "icefog",
+		"win-fakeking": "fakeking",
+	}
+	for in, want := range cases {
+		if got := normaliseAggressive(in); got != want {
+			t.Errorf("normaliseAggressive(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestAggressiveNormalisationKeepsNamesThatAreOnlyDecoration(t *testing.T) {
+	// A value folding to the empty key is not rejected anywhere — it is simply
+	// never added to the aggressive index, so the entry becomes unreachable
+	// under aggressive folding while remaining findable under standard. Every
+	// strip has to be conditional on something surviving it.
+	for _, in := range []string{"(Trendmicro)", "- S1185", "The", "Group", "win", "APT"} {
+		if got := normaliseAggressive(in); got == "" {
+			t.Errorf("normaliseAggressive(%q) emptied the name", in)
+		}
+	}
+}
+
 func TestResolveNormalisationModes(t *testing.T) {
 	// The point of keeping both: the same query must reach an entry under
 	// aggressive folding that standard folding cannot see.
