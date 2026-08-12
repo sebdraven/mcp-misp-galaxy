@@ -68,7 +68,8 @@ func (g *Graph) Profile(uuid string, depth, limit int) (Profile, bool) {
 
 	p := Profile{
 		UUID: n.UUID, Tag: n.Tag(), Value: n.Value, Galaxy: n.Galaxy,
-		Total: len(neighbours),
+		Total:     len(neighbours),
+		Truncated: len(neighbours) == limit,
 	}
 
 	byGalaxy := map[string][]Neighbour{}
