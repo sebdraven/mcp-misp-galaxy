@@ -322,6 +322,44 @@ func (s *Service) Path(from, to string, maxDepth int, edgeTypes []string) (PathR
 	return res, nil
 }
 
+// RefsResult lists the reference URLs recorded on an entry — vendor reports
+// for the most part, plus any catalogue record, which is flagged and sorted
+// last.
+type RefsResult struct {
+	UUID       string                    `json:"uuid"`
+	Tag        string                    `json:"tag,omitempty"`
+	Value      string                    `json:"value"`
+	Galaxy     string                    `json:"galaxy"`
+	Count      int                       `json:"count"`
+	References []galaxy.Reference        `json:"references"`
+	Publishers []galaxy.ReferenceSummary `json:"publishers,omitempty" jsonschema:"how many references each publisher contributed, catalogue records excluded; one publisher means a single point of view"`
+	Note       string                    `json:"note,omitempty"`
+}
+
+// Refs returns the reference URLs recorded on an entry.
+func (s *Service) Refs(uuid string) (RefsResult, error) {
+	g, err := s.graph()
+	if err != nil {
+		return RefsResult{}, err
+	}
+	n, ok := g.Node(uuid)
+	if !ok {
+		return RefsResult{}, fmt.Errorf("%w: %s", ErrUnknownNode, uuid)
+	}
+	refs := n.References()
+	res := RefsResult{
+		UUID: n.UUID, Tag: n.Tag(), Value: n.Value, Galaxy: n.Galaxy,
+		Count: len(refs), References: refs,
+		Publishers: galaxy.ByPublisher(refs),
+	}
+	if len(refs) == 0 {
+		// Worth stating: an empty list here is about this checkout, not about
+		// whether anyone has written about the entry.
+		res.Note = "no references recorded on this entry in this corpus; other galaxies may document the same thing"
+	}
+	return res, nil
+}
+
 // Galaxies lists the galaxies in the checkout.
 func (s *Service) Galaxies() ([]galaxy.GalaxyInfo, error) {
 	g, err := s.graph()
