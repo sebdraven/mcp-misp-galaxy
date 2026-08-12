@@ -21,6 +21,7 @@ func Handler(s *service.Service) http.Handler {
 	mux.HandleFunc("GET /resolve", h.resolve)
 	mux.HandleFunc("GET /node/{uuid}", h.node)
 	mux.HandleFunc("GET /refs/{uuid}", h.refs)
+	mux.HandleFunc("GET /profile/{uuid}", h.profile)
 	mux.HandleFunc("GET /neighbors/{uuid}", h.neighbours)
 	mux.HandleFunc("GET /path", h.path)
 	mux.HandleFunc("GET /galaxies", h.galaxies)
@@ -57,6 +58,11 @@ func (h *handlers) node(w http.ResponseWriter, r *http.Request) {
 
 func (h *handlers) refs(w http.ResponseWriter, r *http.Request) {
 	res, err := h.s.Refs(r.PathValue("uuid"))
+	respond(w, res, err)
+}
+
+func (h *handlers) profile(w http.ResponseWriter, r *http.Request) {
+	res, err := h.s.Profile(r.PathValue("uuid"), intParam(r, "depth", 1), intParam(r, "limit", 0))
 	respond(w, res, err)
 }
 
