@@ -64,6 +64,14 @@ func Register(s *mcp.Server, svc *service.Service) {
 	}, r.galaxies)
 
 	mcp.AddTool(s, &mcp.Tool{
+		Name: "gx_cooccurrence",
+		Description: "Find pairs in an entry's neighbourhood that are used by nearly the same set of actors — the redundant parts of a profile. " +
+			"Two techniques used by the same actors are one observation, not two: counting both inflates a profile without adding anything to it, " +
+			"and the classic examples are semantically nested (spearphishing link and malicious link, spearphishing attachment and malicious file). " +
+			"Run this before treating a long list of shared behaviours as independent evidence. Scored as shared actors over the larger of the two actor sets.",
+	}, r.cooccurrence)
+
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "gx_profile",
 		Description: "Build the profile of an entry: everything linked to it, grouped by kind, with counts of what is specific, generic and unattributed. " +
 			"This is the unit CTI attribution claims are made about — an actor's techniques and tooling, or a malware's actors and techniques — and grouping shows the shape a flat neighbour list hides. " +
@@ -121,6 +129,12 @@ type neighboursInput struct {
 	SkipDangling  bool     `json:"skip_dangling,omitempty" jsonschema:"drop entries referenced by a relation but not defined in this checkout"`
 }
 
+type cooccurrenceInput struct {
+	UUID    string  `json:"uuid" jsonschema:"entry whose neighbourhood to examine, as returned by gx_resolve"`
+	MinRate float64 `json:"min_rate,omitempty" jsonschema:"minimum co-occurrence rate, 0 to 1 (default 0.75). Lower it to see weaker overlaps"`
+	Limit   int     `json:"limit,omitempty" jsonschema:"max pairs to return (default 20)"`
+}
+
 type profileInput struct {
 	UUID  string `json:"uuid" jsonschema:"entry UUID, as returned by gx_resolve"`
 	Depth int    `json:"depth,omitempty" jsonschema:"hops to include (default 1, capped at 4). 1 is what the entry itself is linked to; 2 reaches what those are linked to in turn"`
@@ -171,6 +185,14 @@ func (r *registry) neighbours(ctx context.Context, _ *mcp.CallToolRequest, in ne
 		WithPaths:     in.WithPaths,
 		SkipGhosts:    in.SkipDangling,
 	})
+	return nil, res, err
+}
+
+func (r *registry) cooccurrence(ctx context.Context, _ *mcp.CallToolRequest, in cooccurrenceInput) (*mcp.CallToolResult, service.CoOccurrenceResult, error) {
+	if strings.TrimSpace(in.UUID) == "" {
+		return nil, service.CoOccurrenceResult{}, fmt.Errorf("uuid is required")
+	}
+	res, err := r.svc.CoOccurrence(in.UUID, in.MinRate, in.Limit)
 	return nil, res, err
 }
 
