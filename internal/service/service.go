@@ -360,6 +360,19 @@ func (s *Service) Refs(uuid string) (RefsResult, error) {
 	return res, nil
 }
 
+// Profile returns what the corpus records about an entry, grouped by kind.
+func (s *Service) Profile(uuid string, depth, limit int) (galaxy.Profile, error) {
+	g, err := s.graph()
+	if err != nil {
+		return galaxy.Profile{}, err
+	}
+	p, ok := g.Profile(uuid, depth, limit)
+	if !ok {
+		return galaxy.Profile{}, fmt.Errorf("%w: %s", ErrUnknownNode, uuid)
+	}
+	return p, nil
+}
+
 // Galaxies lists the galaxies in the checkout.
 func (s *Service) Galaxies() ([]galaxy.GalaxyInfo, error) {
 	g, err := s.graph()
