@@ -986,6 +986,146 @@ func TestMostGenericRanksWorstFirst(t *testing.T) {
 	}
 }
 
+// ---- normalisation ----------------------------------------------------------
+
+func TestAggressiveNormalisationStripsDecoration(t *testing.T) {
+	cases := []struct {
+		in, want string
+		why      string
+	}{
+		{"LightSpy - S1185", "lightspy", "MITRE software id"},
+		{"APT28 - G0096", "apt28", "MITRE group id"},
+		{"win.icefog", "icefog", "platform prefix"},
+		{"apk.dragonegg", "dragonegg", "platform prefix"},
+		{"Earth Preta (Trendmicro)", "earthpreta", "vendor suffix"},
+		{"The Gorgon Group", "gorgon", "leading the, collective suffix"},
+		{"Callisto Group", "callisto", "collective suffix"},
+		{"APT-28", "apt28", "punctuation, as in standard"},
+	}
+	for _, c := range cases {
+		if got := normaliseAggressive(c.in); got != c.want {
+			t.Errorf("normaliseAggressive(%q) = %q, want %q (%s)", c.in, got, c.want, c.why)
+		}
+	}
+}
+
+func TestAggressiveNormalisationKeepsBareWords(t *testing.T) {
+	// Stripping must not empty a name that IS the decoration: "Group" and
+	// "win" are legitimate values somewhere in a corpus this size.
+	for _, in := range []string{"Group", "win", "APT"} {
+		if got := normaliseAggressive(in); got == "" {
+			t.Errorf("normaliseAggressive(%q) emptied the name", in)
+		}
+	}
+}
+
+func TestAggressiveNormalisationRespectsWordBoundaries(t *testing.T) {
+	// The failure mode this guards against is silent: a prefix or suffix
+	// stripped without a delimiter mangles ordinary names, and nothing
+	// downstream shows that the key was mangled.
+	cases := []struct {
+		in, want string
+		why      string
+	}{
+		{"Window", "window", "begins with win but is not qualified"},
+		{"Winnti", "winnti", "begins with win"},
+		{"Adapt", "adapt", "ends in apt but is not a collective suffix"},
+		{"Elfin", "elfin", "begins with elf"},
+		{"Pyramid", "pyramid", "begins with py"},
+		{"Teamviewer", "teamviewer", "contains team, not as a suffix"},
+		{"Crewmate", "crewmate", "begins with crew"},
+	}
+	for _, c := range cases {
+		if got := normaliseAggressive(c.in); got != c.want {
+			t.Errorf("normaliseAggressive(%q) = %q, want %q (%s)", c.in, got, c.want, c.why)
+		}
+	}
+}
+
+func TestAggressiveNormalisationStripsMitreTechniqueIDs(t *testing.T) {
+	// Techniques carry T-prefixed ids with a sub-technique part, and they are
+	// the bulk of the corpus's MITRE entries. Data sources and data components
+	// use two-letter prefixes, which a single-letter class silently half-eats.
+	cases := map[string]string{
+		"PowerShell - T1059.001":     "powershell",
+		"Audio Capture - T1123":      "audiocapture",
+		"Malicious File - T1204.002": "maliciousfile",
+		"Process Creation - DS0009":  "processcreation",
+		"Network Traffic - DC0001":   "networktraffic",
+	}
+	for in, want := range cases {
+		if got := normaliseAggressive(in); got != want {
+			t.Errorf("normaliseAggressive(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestAggressiveNormalisationKeepsSpacedPlatformWords(t *testing.T) {
+	// A platform qualifier is written with a dot in Malpedia. A space is how
+	// ordinary names are built, so treating it as a separator amputates the
+	// first word of names that have nothing to do with a platform.
+	cases := map[string]string{
+		"Win Locker":   "winlocker",
+		"JS Sniffer":   "jssniffer",
+		"IOS Implant":  "iosimplant",
+		"win.icefog":   "icefog",
+		"win/icefog":   "icefog",
+		"win-fakeking": "fakeking",
+	}
+	for in, want := range cases {
+		if got := normaliseAggressive(in); got != want {
+			t.Errorf("normaliseAggressive(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestAggressiveNormalisationKeepsNamesThatAreOnlyDecoration(t *testing.T) {
+	// A value folding to the empty key is not rejected anywhere — it is simply
+	// never added to the aggressive index, so the entry becomes unreachable
+	// under aggressive folding while remaining findable under standard. Every
+	// strip has to be conditional on something surviving it.
+	for _, in := range []string{"(Trendmicro)", "- S1185", "The", "Group", "win", "APT"} {
+		if got := normaliseAggressive(in); got == "" {
+			t.Errorf("normaliseAggressive(%q) emptied the name", in)
+		}
+	}
+}
+
+func TestResolveNormalisationModes(t *testing.T) {
+	// The point of keeping both: the same query must reach an entry under
+	// aggressive folding that standard folding cannot see.
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters, "malpedia", []map[string]any{
+		{"value": "win.icefog", "uuid": "m-icefog"},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got := g.ResolveWith("Icefog", nil, 10, Standard); len(got) != 0 {
+		// Standard keeps the platform prefix, so the bare name is a substring
+		// match at best — never an exact one.
+		for _, c := range got {
+			if c.Reason == MatchValue {
+				t.Errorf("standard folding should not match win.icefog exactly, got %+v", c)
+			}
+		}
+	}
+
+	got := g.ResolveWith("Icefog", nil, 10, Aggressive)
+	if len(got) != 1 || got[0].UUID != "m-icefog" {
+		t.Fatalf("aggressive folding should match the platform-qualified name, got %+v", got)
+	}
+	if got[0].Reason != MatchValue {
+		t.Errorf("expected an exact match under aggressive folding, got %q", got[0].Reason)
+	}
+}
+
 // ---- traversal --------------------------------------------------------------
 
 func TestNeighboursFollowsRelationBackwards(t *testing.T) {

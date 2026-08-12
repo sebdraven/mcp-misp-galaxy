@@ -45,7 +45,7 @@ func (h *handlers) resolve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	group := q.Get("group") == "1" || q.Get("group") == "true"
-	res, err := h.s.Resolve(name, csv(q.Get("galaxy")), intParam(r, "limit", 0), group)
+	res, err := h.s.Resolve(name, csv(q.Get("galaxy")), intParam(r, "limit", 0), group, q.Get("normalisation"))
 	respond(w, res, err)
 }
 
@@ -118,6 +118,8 @@ func respond(w http.ResponseWriter, payload any, err error) {
 		writeJSON(w, http.StatusOK, payload)
 	case errors.Is(err, service.ErrUnknownNode):
 		fail(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, service.ErrUnknownNormalisation):
+		fail(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrNotLoaded):
 		// Distinct from a plain 500: the service is up, the corpus is not
 		// ready yet. Retrying later is the right response.

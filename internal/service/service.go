@@ -22,6 +22,14 @@ var ErrNotLoaded = errors.New("galaxy corpus not loaded")
 // ErrUnknownNode is returned for a UUID absent from the graph.
 var ErrUnknownNode = errors.New("unknown uuid")
 
+// ErrUnknownNormalisation is returned for a normalisation that is neither
+// standard nor aggressive.
+//
+// Rejected rather than defaulted: a misspelt "agressive" silently answering
+// under standard folding looks exactly like an aggressive resolve that found
+// nothing extra, which is the one conclusion this parameter exists to test.
+var ErrUnknownNormalisation = errors.New("unknown normalisation: want standard or aggressive")
+
 // DefaultScope is the set of galaxies searched when none is specified.
 //
 // It exists because misp-galaxy is no longer a threat-intelligence corpus: it
@@ -136,19 +144,32 @@ func (s *Service) graph() (*galaxy.Graph, error) {
 
 // ---- queries ----------------------------------------------------------------
 
+// parseNormalisation maps the wire value to a mode. Empty means the default.
+func parseNormalisation(s string) (galaxy.Normalisation, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", string(galaxy.Standard):
+		return galaxy.Standard, nil
+	case string(galaxy.Aggressive):
+		return galaxy.Aggressive, nil
+	default:
+		return "", fmt.Errorf("%w: %q", ErrUnknownNormalisation, s)
+	}
+}
+
 // ResolveResult carries the ranked candidates for a name.
 type ResolveResult struct {
-	Query      string                  `json:"query"`
-	Scope      []string                `json:"scope,omitempty" jsonschema:"galaxies actually searched; absent means the whole corpus"`
-	Count      int                     `json:"count"`
-	Ambiguous  bool                    `json:"ambiguous" jsonschema:"more than one candidate matched; do not treat the first as the answer without checking"`
-	Candidates []galaxy.Candidate      `json:"candidates"`
-	ByGalaxy   []galaxy.CandidateGroup `json:"by_galaxy,omitempty" jsonschema:"the same candidates grouped by galaxy, largest group first"`
+	Query         string                  `json:"query"`
+	Normalisation string                  `json:"normalisation" jsonschema:"which name-folding was used: standard or aggressive"`
+	Scope         []string                `json:"scope,omitempty" jsonschema:"galaxies actually searched; absent means the whole corpus"`
+	Count         int                     `json:"count"`
+	Ambiguous     bool                    `json:"ambiguous" jsonschema:"more than one candidate matched; do not treat the first as the answer without checking"`
+	Candidates    []galaxy.Candidate      `json:"candidates"`
+	ByGalaxy      []galaxy.CandidateGroup `json:"by_galaxy,omitempty" jsonschema:"the same candidates grouped by galaxy, largest group first"`
 }
 
 // Resolve ranks the entries matching a name. galaxies overrides the service
 // scope for this call; pass ScopeAll to search everything.
-func (s *Service) Resolve(q string, galaxies []string, limit int, group bool) (ResolveResult, error) {
+func (s *Service) Resolve(q string, galaxies []string, limit int, group bool, normalisation string) (ResolveResult, error) {
 	g, err := s.graph()
 	if err != nil {
 		return ResolveResult{}, err
@@ -157,13 +178,18 @@ func (s *Service) Resolve(q string, galaxies []string, limit int, group bool) (R
 	if len(galaxies) > 0 {
 		scope = normaliseScope(galaxies)
 	}
-	cands := g.Resolve(q, scope, limit)
+	mode, err := parseNormalisation(normalisation)
+	if err != nil {
+		return ResolveResult{}, err
+	}
+	cands := g.ResolveWith(q, scope, limit, mode)
 	res := ResolveResult{
-		Query:      q,
-		Scope:      scope,
-		Count:      len(cands),
-		Ambiguous:  len(cands) > 1,
-		Candidates: cands,
+		Query:         q,
+		Normalisation: string(mode),
+		Scope:         scope,
+		Count:         len(cands),
+		Ambiguous:     len(cands) > 1,
+		Candidates:    cands,
 	}
 	if group {
 		res.ByGalaxy = galaxy.GroupByGalaxy(cands)

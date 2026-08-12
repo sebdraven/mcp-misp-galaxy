@@ -81,10 +81,11 @@ type registry struct{ svc *service.Service }
 // ---- inputs -----------------------------------------------------------------
 
 type resolveInput struct {
-	Name     string   `json:"name" jsonschema:"the name to resolve; any vendor naming convention, partial names and synonyms all work"`
-	Galaxies []string `json:"galaxies,omitempty" jsonschema:"restrict to these galaxy types, e.g. threat-actor, malpedia, mitre-attack-pattern, android, stalkerware. Omit to use the server's CTI scope; pass [\"all\"] to search the whole corpus including its non-threat taxonomies"`
-	Limit    int      `json:"limit,omitempty" jsonschema:"max candidates (default 20)"`
-	Group    bool     `json:"group,omitempty" jsonschema:"also return the candidates grouped by galaxy, which shows how many naming conventions cover this name"`
+	Name          string   `json:"name" jsonschema:"the name to resolve; any vendor naming convention, partial names and synonyms all work"`
+	Galaxies      []string `json:"galaxies,omitempty" jsonschema:"restrict to these galaxy types, e.g. threat-actor, malpedia, mitre-attack-pattern, android, stalkerware. Omit to use the server's CTI scope; pass [\"all\"] to search the whole corpus including its non-threat taxonomies"`
+	Limit         int      `json:"limit,omitempty" jsonschema:"max candidates (default 20)"`
+	Group         bool     `json:"group,omitempty" jsonschema:"also return the candidates grouped by galaxy, which shows how many naming conventions cover this name"`
+	Normalisation string   `json:"normalisation,omitempty" jsonschema:"how names are folded before matching. 'standard' (default) ignores case and punctuation, so APT28 and APT-28 match. 'aggressive' also strips MITRE id suffixes, platform prefixes, collective words like Group, and trailing vendor names — so win.icefog matches Icefog and 'LightSpy - S1185' matches LightSpy. Aggressive finds more and merges some entries that are not the same thing; run both and compare when it matters"`
 }
 
 type nodeInput struct {
@@ -121,7 +122,7 @@ func (r *registry) resolve(ctx context.Context, _ *mcp.CallToolRequest, in resol
 	if strings.TrimSpace(in.Name) == "" {
 		return nil, service.ResolveResult{}, fmt.Errorf("name is required")
 	}
-	res, err := r.svc.Resolve(in.Name, in.Galaxies, in.Limit, in.Group)
+	res, err := r.svc.Resolve(in.Name, in.Galaxies, in.Limit, in.Group, in.Normalisation)
 	return nil, res, err
 }
 
