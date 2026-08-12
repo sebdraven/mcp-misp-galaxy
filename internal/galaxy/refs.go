@@ -7,7 +7,8 @@ import (
 	"strings"
 )
 
-// Reference is one report documenting an entry.
+// Reference is one URL recorded on an entry: usually a vendor report
+// analysing it, sometimes the entry's own catalogue record.
 type Reference struct {
 	URL    string `json:"url"`
 	Domain string `json:"domain,omitempty" jsonschema:"publisher host, e.g. securelist.com — a rough proxy for who documented this"`
@@ -27,12 +28,13 @@ var selfReferentialHosts = map[string]bool{
 	"apt.etda.or.th":                   true,
 }
 
-// References returns the reports documenting a node.
+// References returns the reference URLs recorded on a node — vendor reports
+// for the most part, plus the occasional catalogue record, which is flagged.
 //
 // They live in meta.refs and nowhere else: the references galaxy holds 5,000+
-// entries but nothing links to it, so no traversal reaches a report. That is
-// why this is an accessor rather than a walk — gx_neighbors will never find
-// them, however deep it goes.
+// entries but nothing links to it, so no traversal reaches one. That is why
+// this is an accessor rather than a walk — gx_neighbors will never find them,
+// however deep it goes.
 func (n *Node) References() []Reference {
 	if n == nil || len(n.Meta) == 0 {
 		return nil
@@ -75,7 +77,7 @@ func (n *Node) References() []Reference {
 	return out
 }
 
-// ReferenceSummary counts how many reports come from one publisher.
+// ReferenceSummary counts how many references come from one publisher.
 type ReferenceSummary struct {
 	Domain string `json:"domain"`
 	Count  int    `json:"count"`

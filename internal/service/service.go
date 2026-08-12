@@ -322,7 +322,9 @@ func (s *Service) Path(from, to string, maxDepth int, edgeTypes []string) (PathR
 	return res, nil
 }
 
-// RefsResult lists the reports documenting an entry.
+// RefsResult lists the reference URLs recorded on an entry — vendor reports
+// for the most part, plus any catalogue record, which is flagged and sorted
+// last.
 type RefsResult struct {
 	UUID       string                    `json:"uuid"`
 	Tag        string                    `json:"tag,omitempty"`
@@ -330,11 +332,11 @@ type RefsResult struct {
 	Galaxy     string                    `json:"galaxy"`
 	Count      int                       `json:"count"`
 	References []galaxy.Reference        `json:"references"`
-	Publishers []galaxy.ReferenceSummary `json:"publishers,omitempty" jsonschema:"how many reports each publisher contributed; one publisher means a single point of view"`
+	Publishers []galaxy.ReferenceSummary `json:"publishers,omitempty" jsonschema:"how many references each publisher contributed, catalogue records excluded; one publisher means a single point of view"`
 	Note       string                    `json:"note,omitempty"`
 }
 
-// Refs returns the reports documenting an entry.
+// Refs returns the reference URLs recorded on an entry.
 func (s *Service) Refs(uuid string) (RefsResult, error) {
 	g, err := s.graph()
 	if err != nil {
