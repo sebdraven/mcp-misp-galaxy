@@ -22,6 +22,7 @@ func Handler(s *service.Service) http.Handler {
 	mux.HandleFunc("GET /node/{uuid}", h.node)
 	mux.HandleFunc("GET /refs/{uuid}", h.refs)
 	mux.HandleFunc("GET /profile/{uuid}", h.profile)
+	mux.HandleFunc("GET /cooccurrence/{uuid}", h.cooccurrence)
 	mux.HandleFunc("GET /neighbors/{uuid}", h.neighbours)
 	mux.HandleFunc("GET /path", h.path)
 	mux.HandleFunc("GET /galaxies", h.galaxies)
@@ -63,6 +64,17 @@ func (h *handlers) refs(w http.ResponseWriter, r *http.Request) {
 
 func (h *handlers) profile(w http.ResponseWriter, r *http.Request) {
 	res, err := h.s.Profile(r.PathValue("uuid"), intParam(r, "depth", 1), intParam(r, "limit", 0))
+	respond(w, res, err)
+}
+
+func (h *handlers) cooccurrence(w http.ResponseWriter, r *http.Request) {
+	rate := 0.0
+	if v := r.URL.Query().Get("min_rate"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			rate = f
+		}
+	}
+	res, err := h.s.CoOccurrence(r.PathValue("uuid"), rate, intParam(r, "limit", 0))
 	respond(w, res, err)
 }
 
