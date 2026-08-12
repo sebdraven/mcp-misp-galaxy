@@ -1044,11 +1044,14 @@ func TestAggressiveNormalisationRespectsWordBoundaries(t *testing.T) {
 
 func TestAggressiveNormalisationStripsMitreTechniqueIDs(t *testing.T) {
 	// Techniques carry T-prefixed ids with a sub-technique part, and they are
-	// the bulk of the corpus's MITRE entries.
+	// the bulk of the corpus's MITRE entries. Data sources and data components
+	// use two-letter prefixes, which a single-letter class silently half-eats.
 	cases := map[string]string{
 		"PowerShell - T1059.001":     "powershell",
 		"Audio Capture - T1123":      "audiocapture",
 		"Malicious File - T1204.002": "maliciousfile",
+		"Process Creation - DS0009":  "processcreation",
+		"Network Traffic - DC0001":   "networktraffic",
 	}
 	for in, want := range cases {
 		if got := normaliseAggressive(in); got != want {

@@ -60,10 +60,20 @@ const (
 
 // mitreSuffix matches the identifier MITRE appends to display names, as in
 // "APT28 - G0096", "LightSpy - S1185" or "PowerShell - T1059.001".
-var mitreSuffix = regexp.MustCompile(`\s*-\s*[GSTMC]\d{3,4}(\.\d{3,4})?\s*$`)
+//
+// The two-letter prefixes are listed before the single letters: Go's regexp is
+// leftmost-first over an alternation, so `[GSTMC]` placed first would match the
+// S of "DS0009" and leave the D behind.
+var mitreSuffix = regexp.MustCompile(`\s*-\s*(?:DS|DC|[GSTMC])\d{3,4}(\.\d{3,4})?\s*$`)
 
-// vendorSuffix matches a trailing vendor in parentheses: "Earth Preta
-// (Trendmicro)", "Hive 0081 (IBM)".
+// vendorSuffix matches a trailing parenthetical, which is usually a vendor:
+// "Earth Preta (Trendmicro)", "Hive 0081 (IBM)".
+//
+// Usually, not always. The corpus also uses the parenthetical to disambiguate —
+// "Foo (malware)" against "Foo (group)" — and stripping it merges precisely the
+// two entries someone took care to separate. Both then come back as exact
+// matches, which is why an aggressive resolve reports Ambiguous rather than
+// letting a caller take the first candidate.
 var vendorSuffix = regexp.MustCompile(`\s*\([^)]*\)\s*$`)
 
 // platformPrefixPattern matches a platform qualifier followed by a separator,
