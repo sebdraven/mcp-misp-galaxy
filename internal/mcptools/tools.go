@@ -45,7 +45,8 @@ func Register(s *mcp.Server, svc *service.Service) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "gx_neighbors",
-		Description: "Walk the relation graph outward from an entry. Relations cross galaxies, so this is how you go from a malware family to the actors using it, and from an actor to the reports documenting it. " +
+		Description: "Walk the relation graph outward from an entry. Relations cross galaxies, so this is how you go from a malware family to the actors using it and the techniques it implements. " +
+			"It does NOT reach the reports documenting an entry — those live in metadata, outside the graph; use gx_refs for those. " +
 			"IMPORTANT: relations in this corpus live almost entirely in the MITRE galaxies (mitre-malware, mitre-intrusion-set, mitre-attack-pattern). " +
 			"The malpedia, threat-actor and tool galaxies carry far fewer, so always start from the candidate gx_resolve reported with the highest degree. Starting from a low-degree entry for the same thing returns almost nothing. " +
 			"Traverses both directions by default, which is deliberate: relations are usually declared on one side only. " +
@@ -64,10 +65,10 @@ func Register(s *mcp.Server, svc *service.Service) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "gx_refs",
-		Description: "List the reports documenting a galaxy entry, by UUID. " +
-			"References are NOT reachable through gx_neighbors: they live in the entry's metadata, and although a 'references' galaxy exists nothing links to it, so no traversal ever finds a report. Use this instead. " +
+		Description: "List the reference URLs recorded on a galaxy entry — mostly vendor reports analysing it, sometimes a catalogue record. " +
+			"These are NOT reachable through gx_neighbors: they live in the entry's metadata, and although a 'references' galaxy exists nothing links to it, so no traversal ever finds one. Use this instead. " +
 			"Also returns a per-publisher count — an entry described by one vendor is a single point of view, one described by several has been looked at independently. " +
-			"Links back to the entry's own catalogue page are flagged 'self_referential' and sorted last; they are records, not analyses.",
+			"Links back to the entry's own catalogue page are flagged 'self_referential' and sorted last; they are records rather than analyses, and are excluded from the publisher count.",
 	}, r.refs)
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -102,10 +103,10 @@ type nodeInput struct {
 
 type neighboursInput struct {
 	UUID          string   `json:"uuid" jsonschema:"starting entry UUID"`
-	Depth         int      `json:"depth,omitempty" jsonschema:"hops to walk (default 1); 2 already spans malware to actor to report"`
+	Depth         int      `json:"depth,omitempty" jsonschema:"hops to walk (default 1, capped at 4); 2 already spans malware to actor to technique"`
 	Direction     string   `json:"direction,omitempty" jsonschema:"both (default), out or in"`
 	Types         []string `json:"types,omitempty" jsonschema:"keep only these relation types, e.g. similar, used-by, subtechnique-of"`
-	Galaxies      []string `json:"galaxies,omitempty" jsonschema:"keep only entries from these galaxy types, e.g. ['references'] for documenting reports, ['malpedia'] for malware families"`
+	Galaxies      []string `json:"galaxies,omitempty" jsonschema:"keep only entries from these galaxy types, e.g. ['malpedia'] for malware families or ['threat-actor'] for the actors behind them"`
 	MaxGroupCount int      `json:"max_group_count,omitempty" jsonschema:"keep only entries linked to AT MOST this many threat actors, and do not walk through the others. Inclusive: 5 keeps entries at 5 actors and drops those at 6. This boundary is not the same as the 'generic' flag, which is set from 10 actors upwards — pass 9 to remove everything flagged generic"`
 	Limit         int      `json:"limit,omitempty" jsonschema:"max entries returned (default 200)"`
 	WithPaths     bool     `json:"with_paths,omitempty" jsonschema:"include the route taken to reach each entry"`
