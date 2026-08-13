@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -371,6 +372,63 @@ func (s *Service) Profile(uuid string, depth, limit int) (galaxy.Profile, error)
 		return galaxy.Profile{}, fmt.Errorf("%w: %s", ErrUnknownNode, uuid)
 	}
 	return p, nil
+}
+
+// ErrInvalidRate is returned when a caller asks for a co-occurrence threshold
+// outside [0,1], or one that is not a number at all.
+var ErrInvalidRate = errors.New("min_rate must be a number between 0 and 1")
+
+// CoOccurrenceResult lists redundant pairs within an entry's neighbourhood.
+type CoOccurrenceResult struct {
+	UUID    string                    `json:"uuid"`
+	Value   string                    `json:"value"`
+	MinRate float64                   `json:"min_rate" jsonschema:"the threshold actually applied"`
+	Count   int                       `json:"count"`
+	Pairs   []galaxy.CoOccurrencePair `json:"pairs"`
+	Note    string                    `json:"note"`
+}
+
+// CoOccurrence finds pairs in an entry's neighbourhood used by nearly the same
+// actors.
+//
+// minRate is a pointer so that "omitted" and "0.0" stay distinguishable: 0 is a
+// legitimate threshold meaning "show every overlap", and folding it into the
+// default would make a documented value unreachable.
+func (s *Service) CoOccurrence(uuid string, minRate *float64, limit int) (CoOccurrenceResult, error) {
+	g, err := s.graph()
+	if err != nil {
+		return CoOccurrenceResult{}, err
+	}
+	n, ok := g.Node(uuid)
+	if !ok {
+		return CoOccurrenceResult{}, fmt.Errorf("%w: %s", ErrUnknownNode, uuid)
+	}
+
+	rate := galaxy.CoOccurrenceThreshold
+	if minRate != nil {
+		// NaN has to be rejected explicitly: every comparison against it is
+		// false, so it would slip past the rate filter and return every pair
+		// while appearing to have applied a threshold.
+		if math.IsNaN(*minRate) || *minRate < 0 || *minRate > 1 {
+			return CoOccurrenceResult{}, fmt.Errorf("%w (got %v)", ErrInvalidRate, *minRate)
+		}
+		rate = *minRate
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+
+	pairs := g.CoOccurrence(uuid, rate, limit)
+	res := CoOccurrenceResult{
+		UUID: n.UUID, Value: n.Value, MinRate: rate,
+		Count: len(pairs), Pairs: pairs,
+	}
+	if len(pairs) > 0 {
+		res.Note = "these pairs are used by nearly the same actors: they are one observation each, not two, and counting both inflates a profile without adding to it"
+	} else {
+		res.Note = "no redundant pairs at or above this threshold in this neighbourhood"
+	}
+	return res, nil
 }
 
 // Galaxies lists the galaxies in the checkout.

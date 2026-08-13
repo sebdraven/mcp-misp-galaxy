@@ -22,6 +22,7 @@ func Handler(s *service.Service) http.Handler {
 	mux.HandleFunc("GET /node/{uuid}", h.node)
 	mux.HandleFunc("GET /refs/{uuid}", h.refs)
 	mux.HandleFunc("GET /profile/{uuid}", h.profile)
+	mux.HandleFunc("GET /cooccurrence/{uuid}", h.cooccurrence)
 	mux.HandleFunc("GET /neighbors/{uuid}", h.neighbours)
 	mux.HandleFunc("GET /path", h.path)
 	mux.HandleFunc("GET /galaxies", h.galaxies)
@@ -63,6 +64,23 @@ func (h *handlers) refs(w http.ResponseWriter, r *http.Request) {
 
 func (h *handlers) profile(w http.ResponseWriter, r *http.Request) {
 	res, err := h.s.Profile(r.PathValue("uuid"), intParam(r, "depth", 1), intParam(r, "limit", 0))
+	respond(w, res, err)
+}
+
+func (h *handlers) cooccurrence(w http.ResponseWriter, r *http.Request) {
+	var minRate *float64
+	if v := r.URL.Query().Get("min_rate"); v != "" {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			// Rejected rather than silently defaulted: a caller who asks for a
+			// threshold and gets another one back would read the result as
+			// answering the question they asked.
+			fail(w, http.StatusBadRequest, "min_rate must be a number between 0 and 1")
+			return
+		}
+		minRate = &f
+	}
+	res, err := h.s.CoOccurrence(r.PathValue("uuid"), minRate, intParam(r, "limit", 0))
 	respond(w, res, err)
 }
 
@@ -130,6 +148,8 @@ func respond(w http.ResponseWriter, payload any, err error) {
 		writeJSON(w, http.StatusOK, payload)
 	case errors.Is(err, service.ErrUnknownNode):
 		fail(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, service.ErrInvalidRate):
+		fail(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrUnknownNormalisation):
 		fail(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrNotLoaded):
