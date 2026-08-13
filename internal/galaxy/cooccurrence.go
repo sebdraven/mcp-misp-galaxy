@@ -124,28 +124,47 @@ func (g *Graph) CoOccurrence(uuid string, minRate float64, limit int) []CoOccurr
 			if rate < minRate {
 				continue
 			}
-			out = append(out, CoOccurrencePair{
+			pair := CoOccurrencePair{
 				AUUID: a.UUID, AValue: a.Value,
 				BUUID: b.UUID, BValue: b.Value,
 				Rate:   rate,
 				Shared: shared,
 				AOnly:  len(sa) - shared,
 				BOnly:  len(sb) - shared,
-			})
+			}
+			// Keep only the best `limit` pairs seen so far. Collecting every
+			// qualifying pair first would make peak memory quadratic in the
+			// neighbourhood, which a zero threshold on a hub reaches easily.
+			if len(out) < limit {
+				out = append(out, pair)
+				if len(out) == limit {
+					sortPairs(out)
+				}
+				continue
+			}
+			if !betterPair(pair, out[len(out)-1]) {
+				continue
+			}
+			out[len(out)-1] = pair
+			sortPairs(out)
 		}
 	}
 
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Rate != out[j].Rate {
-			return out[i].Rate > out[j].Rate
-		}
-		if out[i].Shared != out[j].Shared {
-			return out[i].Shared > out[j].Shared
-		}
-		return out[i].AValue < out[j].AValue
-	})
-	if len(out) > limit {
-		out = out[:limit]
-	}
+	sortPairs(out)
 	return out
+}
+
+// betterPair reports whether a outranks b under the result ordering.
+func betterPair(a, b CoOccurrencePair) bool {
+	if a.Rate != b.Rate {
+		return a.Rate > b.Rate
+	}
+	if a.Shared != b.Shared {
+		return a.Shared > b.Shared
+	}
+	return a.AValue < b.AValue
+}
+
+func sortPairs(p []CoOccurrencePair) {
+	sort.Slice(p, func(i, j int) bool { return betterPair(p[i], p[j]) })
 }
