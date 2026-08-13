@@ -151,6 +151,54 @@ func TestCoOccurrenceSkipsEntriesWithNoActors(t *testing.T) {
 	}
 }
 
+func TestCoOccurrenceDeduplicatesTwoWayNeighbours(t *testing.T) {
+	// A relation declared from both sides appears in Out and In alike, so the
+	// same node reaches the candidate list twice and ends up paired with
+	// itself — a pair that means nothing and that no threshold filters out,
+	// since a set overlaps itself completely.
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters, "mitre-malware", []map[string]any{
+		{"value": "Family", "uuid": "m-1", "related": []map[string]any{
+			{"dest-uuid": "t-both", "type": "uses"},
+		}},
+	})
+	writeCluster(t, clusters, "mitre-attack-pattern", []map[string]any{
+		{"value": "Declared Both Ways", "uuid": "t-both", "related": []map[string]any{
+			{"dest-uuid": "m-1", "type": "used-by"},
+		}},
+	})
+	writeCluster(t, clusters, "threat-actor", []map[string]any{
+		{"value": "An Actor", "uuid": "a-1", "related": []map[string]any{
+			{"dest-uuid": "t-both", "type": "uses"},
+		}},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	for _, p := range g.CoOccurrence("m-1", 0, 50) {
+		if p.AUUID == p.BUUID {
+			t.Errorf("an entry was paired with itself: %+v", p)
+		}
+	}
+}
+
+func TestCoOccurrenceSurvivesInvalidLimit(t *testing.T) {
+	// The service validates, but the method is exported within the module: a
+	// non-positive limit must not index into an empty slice.
+	g := cooccurrenceGraph(t)
+	for _, limit := range []int{0, -1} {
+		if pairs := g.CoOccurrence("m-1", 0, limit); pairs == nil {
+			t.Errorf("limit %d returned nothing; expected the default to apply", limit)
+		}
+	}
+}
+
 func TestCoOccurrenceUnknownUUID(t *testing.T) {
 	g := cooccurrenceGraph(t)
 	if pairs := g.CoOccurrence("nope", CoOccurrenceThreshold, 10); pairs != nil {
