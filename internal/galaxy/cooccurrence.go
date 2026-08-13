@@ -6,12 +6,14 @@ import (
 	"strings"
 )
 
-// CoOccurrencePair is two entries that tend to be used by the same actors.
+// CoOccurrencePair is two entries used by nearly the same set of actors.
 type CoOccurrencePair struct {
 	AUUID  string `json:"a_uuid"`
 	AValue string `json:"a_value"`
+	AGroup int    `json:"a_group_count" jsonschema:"actors linked to A"`
 	BUUID  string `json:"b_uuid"`
 	BValue string `json:"b_value"`
+	BGroup int    `json:"b_group_count" jsonschema:"actors linked to B"`
 
 	// Rate is |actors(A) ∩ actors(B)| / max(|actors(A)|, |actors(B)|).
 	//
