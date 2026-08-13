@@ -202,12 +202,32 @@ func TestCoOccurrenceDividesByLargerSet(t *testing.T) {
 func TestCoOccurrenceScopedToOneEntry(t *testing.T) {
 	// The neighbourhood form still works, and answers a narrower question:
 	// "in this profile, what am I counting twice?".
+	//
+	// Three pairs qualify here, not one: the unrelated technique still overlaps
+	// the other two at 10/12, above the threshold. That is the measure working
+	// as defined — a wide actor set overlaps almost anything — and the reason
+	// the top pair, at a perfect 1.0, is the one worth reading.
 	g := nestedGraph(t)
 	pairs := g.CoOccurrence(CoOccurrenceOpts{
 		UUID: "m-1", MinRate: CoOccurrenceThreshold, Limit: 10,
 	})
-	if len(pairs) != 1 {
-		t.Fatalf("expected only the nested pair, got %+v", pairs)
+	if len(pairs) != 3 {
+		t.Fatalf("expected three qualifying pairs, got %+v", pairs)
+	}
+	top := pairs[0]
+	if top.Rate != 1.0 {
+		t.Errorf("the nested pair should rank first at 1.0, got %v", top.Rate)
+	}
+	if !(top.AUUID == "t-link" && top.BUUID == "t-spear") &&
+		!(top.AUUID == "t-spear" && top.BUUID == "t-link") {
+		t.Errorf("expected the two nested techniques on top, got %s and %s",
+			top.AUUID, top.BUUID)
+	}
+	// The thinly-documented technique is excluded whatever its overlap.
+	for _, p := range pairs {
+		if p.AUUID == "t-rare" || p.BUUID == "t-rare" {
+			t.Errorf("the one-actor technique should not be compared: %+v", p)
+		}
 	}
 }
 
