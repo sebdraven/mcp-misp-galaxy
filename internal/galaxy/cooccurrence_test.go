@@ -39,7 +39,8 @@ func nestedGraph(t *testing.T) *Graph {
 		{"value": "Malicious Link", "uuid": "t-link"},
 		{"value": "Spearphishing Link", "uuid": "t-spear"},
 		{"value": "Something Unrelated", "uuid": "t-other"},
-		// Documented for one actor only: below the floor, so never compared.
+		// Linked to no actor at all, so it sits below any floor and is never
+		// compared — which is what the exclusion tests check.
 		{"value": "Barely Seen", "uuid": "t-rare"},
 	})
 	writeCluster(t, clusters, "mitre-malware", []map[string]any{
@@ -99,6 +100,11 @@ func TestCoOccurrenceExcludesThinlyDocumentedEntries(t *testing.T) {
 	// The floor applies to each entry's own actor set, not to the overlap: two
 	// well-documented entries may still share only a handful of actors.
 	g := nestedGraph(t)
+
+	rare, _ := g.Node("t-rare")
+	if rare.GroupCount != 0 {
+		t.Fatalf("fixture broken: t-rare has %d actors, want 0", rare.GroupCount)
+	}
 	pairs := g.CoOccurrence(CoOccurrenceOpts{
 		Galaxy: "mitre-attack-pattern", MinRate: 0, Limit: 50,
 	})
@@ -107,7 +113,7 @@ func TestCoOccurrenceExcludesThinlyDocumentedEntries(t *testing.T) {
 	}
 	for _, p := range pairs {
 		if p.AUUID == "t-rare" || p.BUUID == "t-rare" {
-			t.Errorf("an entry with one actor must not be compared: %+v", p)
+			t.Errorf("an entry with no actor must not be compared: %+v", p)
 		}
 		if p.AGroup < MinCoOccurrenceActors || p.BGroup < MinCoOccurrenceActors {
 			t.Errorf("an entry below the actor floor slipped through: %+v", p)
@@ -120,7 +126,7 @@ func TestCoOccurrenceMinActorsIsAdjustable(t *testing.T) {
 	// want to see them, as long as the default protects them from doing it by
 	// accident.
 	//
-	// t-rare shares its single actor with the others, so it can actually form
+	// t-thin shares its single actor with the others, so it can actually form
 	// pairs once the floor drops; an entry that shared nobody would be filtered
 	// out by the overlap check instead and prove nothing about the floor.
 	root := t.TempDir()
@@ -223,10 +229,10 @@ func TestCoOccurrenceScopedToOneEntry(t *testing.T) {
 		t.Errorf("expected the two nested techniques on top, got %s and %s",
 			top.AUUID, top.BUUID)
 	}
-	// The thinly-documented technique is excluded whatever its overlap.
+	// The technique no actor is linked to is excluded whatever its overlap.
 	for _, p := range pairs {
 		if p.AUUID == "t-rare" || p.BUUID == "t-rare" {
-			t.Errorf("the one-actor technique should not be compared: %+v", p)
+			t.Errorf("the entry with no actor should not be compared: %+v", p)
 		}
 	}
 }
