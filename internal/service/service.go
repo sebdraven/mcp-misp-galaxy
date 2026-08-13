@@ -378,6 +378,14 @@ func (s *Service) Profile(uuid string, depth, limit int) (galaxy.Profile, error)
 // outside [0,1], or one that is not a number at all.
 var ErrInvalidRate = errors.New("min_rate must be a number between 0 and 1")
 
+// ErrCompareOperands is returned when a comparison is missing one of its two
+// entries.
+var ErrCompareOperands = errors.New("comparison needs two uuids")
+
+// ErrCompareSame is returned when both sides of a comparison are the same
+// entry.
+var ErrCompareSame = errors.New("cannot compare an entry with itself")
+
 // ErrCoOccurrenceScope is returned when neither an entry nor a galaxy is given
 // to scope the search.
 var ErrCoOccurrenceScope = errors.New("co-occurrence needs either a uuid or a galaxy to search")
@@ -459,6 +467,33 @@ func (s *Service) CoOccurrence(uuid, galaxyType string, minRate *float64, minAct
 		res.Note = fmt.Sprintf("no pairs at or above this threshold among entries linked to at least %d actors; most of this corpus is documented for too few actors for the measure to say anything", minActors)
 	}
 	return res, nil
+}
+
+// Compare reports what two entries share and what distinguishes them.
+func (s *Service) Compare(aUUID, bUUID string, opt galaxy.CompareOpts) (galaxy.Comparison, error) {
+	g, err := s.graph()
+	if err != nil {
+		return galaxy.Comparison{}, err
+	}
+	aUUID, bUUID = strings.TrimSpace(aUUID), strings.TrimSpace(bUUID)
+	if aUUID == "" || bUUID == "" {
+		return galaxy.Comparison{}, ErrCompareOperands
+	}
+	if aUUID == bUUID {
+		// Comparing an entry with itself yields a similarity of 1 that means
+		// nothing; better to say so than to return a perfect score.
+		return galaxy.Comparison{}, ErrCompareSame
+	}
+	for _, uuid := range []string{aUUID, bUUID} {
+		if _, ok := g.Node(uuid); !ok {
+			return galaxy.Comparison{}, fmt.Errorf("%w: %s", ErrUnknownNode, uuid)
+		}
+	}
+	cmp, ok := g.Compare(aUUID, bUUID, opt)
+	if !ok {
+		return galaxy.Comparison{}, fmt.Errorf("%w: %s or %s", ErrUnknownNode, aUUID, bUUID)
+	}
+	return cmp, nil
 }
 
 // Galaxies lists the galaxies in the checkout.
