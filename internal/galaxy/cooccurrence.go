@@ -1,6 +1,7 @@
 package galaxy
 
 import (
+	"math"
 	"sort"
 	"strings"
 )
@@ -75,13 +76,28 @@ func (g *Graph) CoOccurrence(uuid string, minRate float64, limit int) []CoOccurr
 	if !ok {
 		return nil
 	}
+	// Defensive: the service validates these, but the method is exported within
+	// the module and a non-positive limit would index into an empty slice.
+	if limit <= 0 {
+		limit = 20
+	}
+	if math.IsNaN(minRate) {
+		minRate = CoOccurrenceThreshold
+	}
 
 	// Only entries with actors can co-occur: the measure is defined over
 	// actor sets, and an entry nobody is linked to has none.
+	//
+	// Deduplicated because a relation declared from both sides appears in Out
+	// and In alike; without this the same node enters twice and gets paired
+	// with itself.
 	var candidates []*Node
 	actors := map[*Node]map[string]bool{}
 	for _, e := range undirectedEdges(start) {
 		if e.To == start || e.To.Dangling {
+			continue
+		}
+		if _, already := actors[e.To]; already {
 			continue
 		}
 		if ActorGalaxies[strings.ToLower(e.To.Galaxy)] {
