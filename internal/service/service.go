@@ -405,17 +405,28 @@ func (s *Service) CoOccurrence(uuid, galaxyType string, minRate *float64, minAct
 	if err != nil {
 		return CoOccurrenceResult{}, err
 	}
+	// Trimmed here rather than at each façade: a query string of spaces would
+	// otherwise pass the scope check and return an empty result as though the
+	// galaxy simply held nothing.
+	uuid = strings.TrimSpace(uuid)
+	galaxyType = strings.TrimSpace(galaxyType)
 	if uuid == "" && galaxyType == "" {
 		return CoOccurrenceResult{}, ErrCoOccurrenceScope
 	}
 
-	res := CoOccurrenceResult{Galaxy: galaxyType}
+	var res CoOccurrenceResult
 	if uuid != "" {
 		n, ok := g.Node(uuid)
 		if !ok {
 			return CoOccurrenceResult{}, fmt.Errorf("%w: %s", ErrUnknownNode, uuid)
 		}
 		res.UUID, res.Value = n.UUID, n.Value
+		// The UUID scope wins, so the galaxy is dropped rather than echoed:
+		// reporting a scope that was not applied invites the answer to be read
+		// as covering a whole taxonomy when it covers one neighbourhood.
+		galaxyType = ""
+	} else {
+		res.Galaxy = galaxyType
 	}
 
 	rate := galaxy.CoOccurrenceThreshold
