@@ -119,9 +119,47 @@ func TestCoOccurrenceMinActorsIsAdjustable(t *testing.T) {
 	// Lowering the floor should let thinner entries back in — the caller may
 	// want to see them, as long as the default protects them from doing it by
 	// accident.
-	g := nestedGraph(t)
+	//
+	// t-rare shares its single actor with the others, so it can actually form
+	// pairs once the floor drops; an entry that shared nobody would be filtered
+	// out by the overlap check instead and prove nothing about the floor.
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	var actors []map[string]any
+	for i := 0; i < 8; i++ {
+		rel := []map[string]any{
+			{"dest-uuid": "t-wide-a", "type": "uses"},
+			{"dest-uuid": "t-wide-b", "type": "uses"},
+		}
+		if i == 0 {
+			rel = append(rel, map[string]any{"dest-uuid": "t-thin", "type": "uses"})
+		}
+		actors = append(actors, map[string]any{
+			"value": fmt.Sprintf("Actor %d", i), "uuid": fmt.Sprintf("a-%d", i),
+			"related": rel,
+		})
+	}
+	writeCluster(t, clusters, "threat-actor", actors)
+	writeCluster(t, clusters, "mitre-attack-pattern", []map[string]any{
+		{"value": "Wide A", "uuid": "t-wide-a"},
+		{"value": "Wide B", "uuid": "t-wide-b"},
+		{"value": "Thin", "uuid": "t-thin"},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	thin, _ := g.Node("t-thin")
+	if thin.GroupCount != 1 {
+		t.Fatalf("fixture broken: t-thin has %d actors, want 1", thin.GroupCount)
+	}
+
 	strict := g.CoOccurrence(CoOccurrenceOpts{
-		Galaxy: "mitre-attack-pattern", MinRate: 0, MinActors: 10, Limit: 50,
+		Galaxy: "mitre-attack-pattern", MinRate: 0, MinActors: 5, Limit: 50,
 	})
 	loose := g.CoOccurrence(CoOccurrenceOpts{
 		Galaxy: "mitre-attack-pattern", MinRate: 0, MinActors: 1, Limit: 50,
@@ -129,6 +167,11 @@ func TestCoOccurrenceMinActorsIsAdjustable(t *testing.T) {
 	if len(loose) <= len(strict) {
 		t.Errorf("a lower floor should admit more pairs, got %d vs %d",
 			len(loose), len(strict))
+	}
+	for _, p := range strict {
+		if p.AUUID == "t-thin" || p.BUUID == "t-thin" {
+			t.Errorf("the thin entry should be excluded at the default floor: %+v", p)
+		}
 	}
 }
 
