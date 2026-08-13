@@ -35,6 +35,14 @@ type CoOccurrencePair struct {
 // counting both as evidence is double counting.
 const CoOccurrenceThreshold = 0.75
 
+// MaxCoOccurrenceCandidates caps how many neighbours are paired up.
+//
+// The comparison is quadratic in candidates, and both façades are reachable
+// without authentication: a hub with a few thousand neighbours and a zero
+// threshold would otherwise materialise millions of pairs before sorting. The
+// cap keeps the worst case bounded at roughly 125,000 comparisons.
+const MaxCoOccurrenceCandidates = 500
+
 // actorsOf returns the actors linked to a node, as a set.
 func (g *Graph) actorsOf(n *Node) map[string]bool {
 	out := map[string]bool{}
@@ -85,6 +93,12 @@ func (g *Graph) CoOccurrence(uuid string, minRate float64, limit int) []CoOccurr
 		}
 		candidates = append(candidates, e.To)
 		actors[e.To] = set
+		if len(candidates) == MaxCoOccurrenceCandidates {
+			// Deliberately silent truncation of the candidate set rather than an
+			// error: the measure is a reading aid, and refusing to answer on the
+			// busiest entries would remove it exactly where redundancy is worst.
+			break
+		}
 	}
 
 	var out []CoOccurrencePair
