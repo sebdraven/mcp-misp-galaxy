@@ -65,10 +65,11 @@ func Register(s *mcp.Server, svc *service.Service) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "gx_cooccurrence",
-		Description: "Find pairs in an entry's neighbourhood that are used by nearly the same set of actors — the redundant parts of a profile. " +
-			"Two techniques used by the same actors are one observation, not two: counting both inflates a profile without adding anything to it, " +
-			"and the classic examples are semantically nested (spearphishing link and malicious link, spearphishing attachment and malicious file). " +
-			"Run this before treating a long list of shared behaviours as independent evidence. Scored as shared actors over the larger of the two actor sets.",
+		Description: "Find pairs of entries used by nearly the same set of actors — redundancy that inflates a profile without adding to it. " +
+			"Two techniques used by the same actors are one observation, not two, and the pairs that surface are usually semantically nested: " +
+			"a spearphishing link is a kind of malicious link, a spearphishing attachment a kind of malicious file. " +
+			"Scope it with 'galaxy' to search a whole taxonomy — that is where the measure works, since it needs entries documented for many actors — or with 'uuid' for one entry's neighbourhood. " +
+			"Entries linked to fewer than five actors are excluded by default: over tiny sets the rate is degenerate, and two unrelated entries sharing one actor score a perfect 1.0.",
 	}, r.cooccurrence)
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -130,9 +131,11 @@ type neighboursInput struct {
 }
 
 type cooccurrenceInput struct {
-	UUID    string   `json:"uuid" jsonschema:"entry whose neighbourhood to examine, as returned by gx_resolve"`
-	MinRate *float64 `json:"min_rate,omitempty" jsonschema:"minimum co-occurrence rate to report, from 0 to 1. Omit for the default of 0.75; pass 0 explicitly to see every overlap, however weak"`
-	Limit   int      `json:"limit,omitempty" jsonschema:"max pairs to return (default 20)"`
+	UUID      string   `json:"uuid,omitempty" jsonschema:"scope the search to one entry's neighbourhood. Either this or 'galaxy' is required"`
+	Galaxy    string   `json:"galaxy,omitempty" jsonschema:"scope the search to a whole galaxy, e.g. mitre-attack-pattern. This is what the literature does, and the only way to surface pairs that are shared across the corpus rather than sitting next to one entry"`
+	MinRate   *float64 `json:"min_rate,omitempty" jsonschema:"minimum co-occurrence rate to report, from 0 to 1. Omit for the default of 0.75; pass 0 explicitly to see every overlap, however weak"`
+	MinActors int      `json:"min_actors,omitempty" jsonschema:"ignore entries linked to fewer actors than this (default 5). Below a handful of actors the rate is degenerate: two entries with the same single actor score a perfect 1.0 however unrelated they are"`
+	Limit     int      `json:"limit,omitempty" jsonschema:"max pairs to return (default 20)"`
 }
 
 type profileInput struct {
@@ -189,10 +192,10 @@ func (r *registry) neighbours(ctx context.Context, _ *mcp.CallToolRequest, in ne
 }
 
 func (r *registry) cooccurrence(ctx context.Context, _ *mcp.CallToolRequest, in cooccurrenceInput) (*mcp.CallToolResult, service.CoOccurrenceResult, error) {
-	if strings.TrimSpace(in.UUID) == "" {
-		return nil, service.CoOccurrenceResult{}, fmt.Errorf("uuid is required")
-	}
-	res, err := r.svc.CoOccurrence(in.UUID, in.MinRate, in.Limit)
+	res, err := r.svc.CoOccurrence(
+		strings.TrimSpace(in.UUID), strings.TrimSpace(in.Galaxy),
+		in.MinRate, in.MinActors, in.Limit,
+	)
 	return nil, res, err
 }
 

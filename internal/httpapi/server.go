@@ -22,6 +22,7 @@ func Handler(s *service.Service) http.Handler {
 	mux.HandleFunc("GET /node/{uuid}", h.node)
 	mux.HandleFunc("GET /refs/{uuid}", h.refs)
 	mux.HandleFunc("GET /profile/{uuid}", h.profile)
+	mux.HandleFunc("GET /cooccurrence", h.cooccurrence)
 	mux.HandleFunc("GET /cooccurrence/{uuid}", h.cooccurrence)
 	mux.HandleFunc("GET /neighbors/{uuid}", h.neighbours)
 	mux.HandleFunc("GET /path", h.path)
@@ -80,7 +81,10 @@ func (h *handlers) cooccurrence(w http.ResponseWriter, r *http.Request) {
 		}
 		minRate = &f
 	}
-	res, err := h.s.CoOccurrence(r.PathValue("uuid"), minRate, intParam(r, "limit", 0))
+	res, err := h.s.CoOccurrence(
+		r.PathValue("uuid"), r.URL.Query().Get("galaxy"),
+		minRate, intParam(r, "min_actors", 0), intParam(r, "limit", 0),
+	)
 	respond(w, res, err)
 }
 
@@ -149,6 +153,8 @@ func respond(w http.ResponseWriter, payload any, err error) {
 	case errors.Is(err, service.ErrUnknownNode):
 		fail(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, service.ErrInvalidRate):
+		fail(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, service.ErrCoOccurrenceScope):
 		fail(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrUnknownNormalisation):
 		fail(w, http.StatusBadRequest, err.Error())

@@ -378,30 +378,55 @@ func (s *Service) Profile(uuid string, depth, limit int) (galaxy.Profile, error)
 // outside [0,1], or one that is not a number at all.
 var ErrInvalidRate = errors.New("min_rate must be a number between 0 and 1")
 
-// CoOccurrenceResult lists redundant pairs within an entry's neighbourhood.
+// ErrCoOccurrenceScope is returned when neither an entry nor a galaxy is given
+// to scope the search.
+var ErrCoOccurrenceScope = errors.New("co-occurrence needs either a uuid or a galaxy to search")
+
+// CoOccurrenceResult lists pairs used by nearly the same actors.
 type CoOccurrenceResult struct {
-	UUID    string                    `json:"uuid"`
-	Value   string                    `json:"value"`
-	MinRate float64                   `json:"min_rate" jsonschema:"the threshold actually applied"`
-	Count   int                       `json:"count"`
-	Pairs   []galaxy.CoOccurrencePair `json:"pairs"`
-	Note    string                    `json:"note"`
+	UUID      string                    `json:"uuid,omitempty"`
+	Value     string                    `json:"value,omitempty"`
+	Galaxy    string                    `json:"galaxy,omitempty"`
+	MinRate   float64                   `json:"min_rate" jsonschema:"the threshold actually applied"`
+	MinActors int                       `json:"min_actors" jsonschema:"entries linked to fewer actors than this were excluded, because the rate is meaningless over tiny sets"`
+	Count     int                       `json:"count"`
+	Pairs     []galaxy.CoOccurrencePair `json:"pairs"`
+	Note      string                    `json:"note"`
 }
 
-// CoOccurrence finds pairs in an entry's neighbourhood used by nearly the same
-// actors.
+// CoOccurrence finds pairs used by nearly the same actors, either within one
+// entry's neighbourhood or across a whole galaxy.
 //
 // minRate is a pointer so that "omitted" and "0.0" stay distinguishable: 0 is a
 // legitimate threshold meaning "show every overlap", and folding it into the
 // default would make a documented value unreachable.
-func (s *Service) CoOccurrence(uuid string, minRate *float64, limit int) (CoOccurrenceResult, error) {
+func (s *Service) CoOccurrence(uuid, galaxyType string, minRate *float64, minActors, limit int) (CoOccurrenceResult, error) {
 	g, err := s.graph()
 	if err != nil {
 		return CoOccurrenceResult{}, err
 	}
-	n, ok := g.Node(uuid)
-	if !ok {
-		return CoOccurrenceResult{}, fmt.Errorf("%w: %s", ErrUnknownNode, uuid)
+	// Trimmed here rather than at each façade: a query string of spaces would
+	// otherwise pass the scope check and return an empty result as though the
+	// galaxy simply held nothing.
+	uuid = strings.TrimSpace(uuid)
+	galaxyType = strings.TrimSpace(galaxyType)
+	if uuid == "" && galaxyType == "" {
+		return CoOccurrenceResult{}, ErrCoOccurrenceScope
+	}
+
+	var res CoOccurrenceResult
+	if uuid != "" {
+		n, ok := g.Node(uuid)
+		if !ok {
+			return CoOccurrenceResult{}, fmt.Errorf("%w: %s", ErrUnknownNode, uuid)
+		}
+		res.UUID, res.Value = n.UUID, n.Value
+		// The UUID scope wins, so the galaxy is dropped rather than echoed:
+		// reporting a scope that was not applied invites the answer to be read
+		// as covering a whole taxonomy when it covers one neighbourhood.
+		galaxyType = ""
+	} else {
+		res.Galaxy = galaxyType
 	}
 
 	rate := galaxy.CoOccurrenceThreshold
@@ -414,19 +439,24 @@ func (s *Service) CoOccurrence(uuid string, minRate *float64, limit int) (CoOccu
 		}
 		rate = *minRate
 	}
+	if minActors <= 0 {
+		minActors = galaxy.MinCoOccurrenceActors
+	}
 	if limit <= 0 {
 		limit = 20
 	}
 
-	pairs := g.CoOccurrence(uuid, rate, limit)
-	res := CoOccurrenceResult{
-		UUID: n.UUID, Value: n.Value, MinRate: rate,
-		Count: len(pairs), Pairs: pairs,
-	}
+	pairs := g.CoOccurrence(galaxy.CoOccurrenceOpts{
+		UUID: uuid, Galaxy: galaxyType,
+		MinRate: rate, MinActors: minActors, Limit: limit,
+	})
+	res.MinRate, res.MinActors = rate, minActors
+	res.Count, res.Pairs = len(pairs), pairs
+
 	if len(pairs) > 0 {
-		res.Note = "these pairs are used by nearly the same actors: they are one observation each, not two, and counting both inflates a profile without adding to it"
+		res.Note = "these pairs are used by nearly the same actors: they are one observation each, not two, and counting both inflates a profile without adding to it. The pairs that surface this way are usually semantically nested, so check whether one is simply a kind of the other"
 	} else {
-		res.Note = "no redundant pairs at or above this threshold in this neighbourhood"
+		res.Note = fmt.Sprintf("no pairs at or above this threshold among entries linked to at least %d actors; most of this corpus is documented for too few actors for the measure to say anything", minActors)
 	}
 	return res, nil
 }

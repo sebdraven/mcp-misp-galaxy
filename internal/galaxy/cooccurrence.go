@@ -6,12 +6,14 @@ import (
 	"strings"
 )
 
-// CoOccurrencePair is two entries that tend to be used by the same actors.
+// CoOccurrencePair is two entries used by nearly the same set of actors.
 type CoOccurrencePair struct {
 	AUUID  string `json:"a_uuid"`
 	AValue string `json:"a_value"`
+	AGroup int    `json:"a_group_count" jsonschema:"actors linked to A"`
 	BUUID  string `json:"b_uuid"`
 	BValue string `json:"b_value"`
+	BGroup int    `json:"b_group_count" jsonschema:"actors linked to B"`
 
 	// Rate is |actors(A) ∩ actors(B)| / max(|actors(A)|, |actors(B)|).
 	//
@@ -36,12 +38,24 @@ type CoOccurrencePair struct {
 // counting both as evidence is double counting.
 const CoOccurrenceThreshold = 0.75
 
-// MaxCoOccurrenceCandidates caps how many neighbours are paired up.
+// MinCoOccurrenceActors is the smallest actor set the measure is applied to.
+//
+// Below it the rate is degenerate rather than merely noisy: two entries with a
+// single actor each, and the same one, score a perfect 1.0 however unrelated
+// they are. Most of this corpus is in that state — an implant documented for
+// one group makes every pair of its techniques look redundant — so without a
+// floor the tool reports spurious redundancy almost everywhere.
+//
+// The literature applies the measure to techniques used by dozens of groups,
+// where a high rate genuinely means "these appear together for nearly everyone
+// who uses either".
+const MinCoOccurrenceActors = 5
+
+// MaxCoOccurrenceCandidates caps how many entries are paired up.
 //
 // The comparison is quadratic in candidates, and both façades are reachable
 // without authentication: a hub with a few thousand neighbours and a zero
-// threshold would otherwise materialise millions of pairs before sorting. The
-// cap keeps the worst case bounded at roughly 125,000 comparisons.
+// threshold would otherwise materialise millions of pairs before sorting.
 const MaxCoOccurrenceCandidates = 500
 
 // actorsOf returns the actors linked to a node, as a set.
@@ -58,64 +72,45 @@ func (g *Graph) actorsOf(n *Node) map[string]bool {
 	return out
 }
 
-// CoOccurrence finds, among the neighbours of an entry, the pairs used by
-// almost the same set of actors.
+// CoOccurrenceOpts tunes a co-occurrence search.
+type CoOccurrenceOpts struct {
+	// UUID scopes the search to one entry's neighbourhood. Empty searches a
+	// whole galaxy instead — which is what the literature does, and the only
+	// way to surface the pairs it reports, since those are shared across the
+	// corpus rather than sitting next to any one entry.
+	UUID string
+
+	// Galaxy scopes a corpus-wide search. Required when UUID is empty.
+	Galaxy string
+
+	MinRate   float64
+	MinActors int
+	Limit     int
+}
+
+// CoOccurrence finds pairs of entries used by nearly the same set of actors.
 //
-// Scoped to one entry's neighbourhood rather than the whole corpus: comparing
-// every pair of 55,000 nodes is quadratic, and the useful question is narrower
-// anyway — "in this profile, what am I counting twice?".
+// Pairs above the rate are not independent evidence. Two techniques used by
+// the same actors tell you what one of them tells you; treating them as two
+// findings inflates a profile without adding anything to it. The pairs the
+// literature reports are semantically nested — a spearphishing link is a kind
+// of malicious link — so what the measure really surfaces is redundancy
+// already present in the taxonomy.
 //
-// Pairs at or above minRate are not independent evidence. Two techniques used
-// by the same actors tell you what one of them tells you; treating them as two
-// findings inflates a profile without adding anything to it.
-//
-// minRate and limit are taken as given: validation and defaulting belong to
-// the service layer, so both façades reject the same inputs the same way.
-func (g *Graph) CoOccurrence(uuid string, minRate float64, limit int) []CoOccurrencePair {
-	start, ok := g.nodes[uuid]
-	if !ok {
-		return nil
+// Defaults and validation belong to the service layer; the values passed here
+// are used as given, bar defensive guards against a crash.
+func (g *Graph) CoOccurrence(opt CoOccurrenceOpts) []CoOccurrencePair {
+	if opt.Limit <= 0 {
+		opt.Limit = 20
 	}
-	// Defensive: the service validates these, but the method is exported within
-	// the module and a non-positive limit would index into an empty slice.
-	if limit <= 0 {
-		limit = 20
+	if math.IsNaN(opt.MinRate) {
+		opt.MinRate = CoOccurrenceThreshold
 	}
-	if math.IsNaN(minRate) {
-		minRate = CoOccurrenceThreshold
+	if opt.MinActors <= 0 {
+		opt.MinActors = MinCoOccurrenceActors
 	}
 
-	// Only entries with actors can co-occur: the measure is defined over
-	// actor sets, and an entry nobody is linked to has none.
-	//
-	// Deduplicated because a relation declared from both sides appears in Out
-	// and In alike; without this the same node enters twice and gets paired
-	// with itself.
-	var candidates []*Node
-	actors := map[*Node]map[string]bool{}
-	for _, e := range undirectedEdges(start) {
-		if e.To == start || e.To.Dangling {
-			continue
-		}
-		if _, already := actors[e.To]; already {
-			continue
-		}
-		if ActorGalaxies[strings.ToLower(e.To.Galaxy)] {
-			continue // an actor is not a behaviour to be co-observed
-		}
-		set := g.actorsOf(e.To)
-		if len(set) == 0 {
-			continue
-		}
-		candidates = append(candidates, e.To)
-		actors[e.To] = set
-		if len(candidates) == MaxCoOccurrenceCandidates {
-			// Deliberately silent truncation of the candidate set rather than an
-			// error: the measure is a reading aid, and refusing to answer on the
-			// busiest entries would remove it exactly where redundancy is worst.
-			break
-		}
-	}
+	candidates, actors := g.coOccurrenceCandidates(opt)
 
 	var out []CoOccurrencePair
 	for i := 0; i < len(candidates); i++ {
@@ -137,12 +132,12 @@ func (g *Graph) CoOccurrence(uuid string, minRate float64, limit int) []CoOccurr
 				denom = len(sb)
 			}
 			rate := float64(shared) / float64(denom)
-			if rate < minRate {
+			if rate < opt.MinRate {
 				continue
 			}
 			pair := CoOccurrencePair{
-				AUUID: a.UUID, AValue: a.Value,
-				BUUID: b.UUID, BValue: b.Value,
+				AUUID: a.UUID, AValue: a.Value, AGroup: len(sa),
+				BUUID: b.UUID, BValue: b.Value, BGroup: len(sb),
 				Rate:   rate,
 				Shared: shared,
 				AOnly:  len(sa) - shared,
@@ -150,10 +145,10 @@ func (g *Graph) CoOccurrence(uuid string, minRate float64, limit int) []CoOccurr
 			}
 			// Keep only the best `limit` pairs seen so far. Collecting every
 			// qualifying pair first would make peak memory quadratic in the
-			// neighbourhood, which a zero threshold on a hub reaches easily.
-			if len(out) < limit {
+			// candidate set, which a zero threshold reaches easily.
+			if len(out) < opt.Limit {
 				out = append(out, pair)
-				if len(out) == limit {
+				if len(out) == opt.Limit {
 					sortPairs(out)
 				}
 				continue
@@ -168,6 +163,62 @@ func (g *Graph) CoOccurrence(uuid string, minRate float64, limit int) []CoOccurr
 
 	sortPairs(out)
 	return out
+}
+
+// coOccurrenceCandidates gathers the entries to compare, either from one
+// entry's neighbourhood or from a whole galaxy.
+func (g *Graph) coOccurrenceCandidates(opt CoOccurrenceOpts) ([]*Node, map[*Node]map[string]bool) {
+	var pool []*Node
+	if opt.UUID != "" {
+		start, ok := g.nodes[opt.UUID]
+		if !ok {
+			return nil, nil
+		}
+		seen := map[*Node]bool{start: true}
+		for _, e := range undirectedEdges(start) {
+			// Deduplicated: a relation declared from both sides appears in Out
+			// and In alike, and the same node would otherwise be paired with
+			// itself.
+			if seen[e.To] {
+				continue
+			}
+			seen[e.To] = true
+			pool = append(pool, e.To)
+		}
+	} else {
+		pool = g.byGalaxy[strings.ToLower(opt.Galaxy)]
+		if pool == nil {
+			for gt, nodes := range g.byGalaxy {
+				if strings.EqualFold(gt, opt.Galaxy) {
+					pool = nodes
+					break
+				}
+			}
+		}
+	}
+
+	var candidates []*Node
+	actors := map[*Node]map[string]bool{}
+	for _, n := range pool {
+		if n.Dangling {
+			continue
+		}
+		if ActorGalaxies[strings.ToLower(n.Galaxy)] {
+			continue // an actor is not a behaviour to be co-observed
+		}
+		set := g.actorsOf(n)
+		// The floor is what keeps the measure meaningful: below it a shared
+		// actor or two produces a perfect score between unrelated entries.
+		if len(set) < opt.MinActors {
+			continue
+		}
+		candidates = append(candidates, n)
+		actors[n] = set
+		if len(candidates) == MaxCoOccurrenceCandidates {
+			break
+		}
+	}
+	return candidates, actors
 }
 
 // betterPair reports whether a outranks b under the result ordering.
