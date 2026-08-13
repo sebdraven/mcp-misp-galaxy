@@ -95,16 +95,22 @@ func TestCoOccurrenceExcludesThinlyDocumentedEntries(t *testing.T) {
 	// entries with one actor each score 1.0 against anything sharing that
 	// actor, so an implant documented for a single group turned every pair of
 	// its techniques into apparent redundancy.
+	//
+	// The floor applies to each entry's own actor set, not to the overlap: two
+	// well-documented entries may still share only a handful of actors.
 	g := nestedGraph(t)
 	pairs := g.CoOccurrence(CoOccurrenceOpts{
 		Galaxy: "mitre-attack-pattern", MinRate: 0, Limit: 50,
 	})
+	if len(pairs) == 0 {
+		t.Fatal("expected the well-documented techniques to still be compared")
+	}
 	for _, p := range pairs {
 		if p.AUUID == "t-rare" || p.BUUID == "t-rare" {
 			t.Errorf("an entry with one actor must not be compared: %+v", p)
 		}
-		if p.Shared < MinCoOccurrenceActors {
-			t.Errorf("a pair below the actor floor slipped through: %+v", p)
+		if p.AGroup < MinCoOccurrenceActors || p.BGroup < MinCoOccurrenceActors {
+			t.Errorf("an entry below the actor floor slipped through: %+v", p)
 		}
 	}
 }
