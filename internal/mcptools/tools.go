@@ -64,6 +64,15 @@ func Register(s *mcp.Server, svc *service.Service) {
 	}, r.galaxies)
 
 	mcp.AddTool(s, &mcp.Tool{
+		Name: "gx_compare",
+		Description: "Compare two entries: what they share, what is unique to each, and a similarity score. " +
+			"Answers 'what do these two have in common' — two actors, two malware families, an actor and a family. " +
+			"Generic entries are excluded before scoring, and that is what makes the number usable: every actor spearphishes, so leaving those in makes every pair look alike. " +
+			"Read the shared list rather than the score: entries with a low group_count are what actually tie the two together, and the answer says so when everything shared is widely used. " +
+			"Treat a high score as a question worth asking, not an answer: profile similarity tracks how much has been written about each side at least as much as it tracks real kinship.",
+	}, r.compare)
+
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "gx_cooccurrence",
 		Description: "Find pairs of entries used by nearly the same set of actors — redundancy that inflates a profile without adding to it. " +
 			"Two techniques used by the same actors are one observation, not two, and the pairs that surface are usually semantically nested: " +
@@ -130,6 +139,15 @@ type neighboursInput struct {
 	SkipDangling  bool     `json:"skip_dangling,omitempty" jsonschema:"drop entries referenced by a relation but not defined in this checkout"`
 }
 
+type compareInput struct {
+	A              string   `json:"a" jsonschema:"first entry UUID, as returned by gx_resolve"`
+	B              string   `json:"b" jsonschema:"second entry UUID"`
+	Depth          int      `json:"depth,omitempty" jsonschema:"hops to include on each side (default 1, capped at 4)"`
+	Galaxies       []string `json:"galaxies,omitempty" jsonschema:"restrict the comparison to certain kinds of neighbour, e.g. ['mitre-malware'] to compare tooling alone"`
+	IncludeGeneric bool     `json:"include_generic,omitempty" jsonschema:"keep widely-shared entries in the comparison. Off by default: including them inflates similarity for every pair, since the behaviours everyone shares dominate the overlap"`
+	Limit          int      `json:"limit,omitempty" jsonschema:"max entries listed per section (default 100)"`
+}
+
 type cooccurrenceInput struct {
 	UUID      string   `json:"uuid,omitempty" jsonschema:"scope the search to one entry's neighbourhood. Either this or 'galaxy' is required"`
 	Galaxy    string   `json:"galaxy,omitempty" jsonschema:"scope the search to a whole galaxy, e.g. mitre-attack-pattern. This is what the literature does, and the only way to surface pairs that are shared across the corpus rather than sitting next to one entry"`
@@ -187,6 +205,16 @@ func (r *registry) neighbours(ctx context.Context, _ *mcp.CallToolRequest, in ne
 		Limit:         in.Limit,
 		WithPaths:     in.WithPaths,
 		SkipGhosts:    in.SkipDangling,
+	})
+	return nil, res, err
+}
+
+func (r *registry) compare(ctx context.Context, _ *mcp.CallToolRequest, in compareInput) (*mcp.CallToolResult, galaxy.Comparison, error) {
+	res, err := r.svc.Compare(in.A, in.B, galaxy.CompareOpts{
+		Depth:          in.Depth,
+		Galaxies:       in.Galaxies,
+		IncludeGeneric: in.IncludeGeneric,
+		Limit:          in.Limit,
 	})
 	return nil, res, err
 }
