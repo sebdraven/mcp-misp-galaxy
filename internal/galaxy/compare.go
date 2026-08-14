@@ -43,6 +43,12 @@ type Comparison struct {
 	// can tell a genuinely thin overlap from one that was mostly noise.
 	GenericExcluded int `json:"generic_excluded"`
 
+	// Truncated marks a comparison scored over a ranked slice of a
+	// neighbourhood rather than the whole of it. On a high-degree entry the
+	// similarity is then an estimate, and reading it as exact overstates what
+	// was measured.
+	Truncated bool `json:"truncated,omitempty"`
+
 	Note string `json:"note,omitempty"`
 }
 
@@ -204,7 +210,7 @@ func (g *Graph) comparableSet(uuid string, walk NeighbourOpts, includeGeneric bo
 			GroupCount: n.GroupCount, Generic: n.Generic,
 		}
 	}
-	return out, dropped
+	return out, dropped, len(neighbours) >= walk.Limit
 }
 
 func allGeneric(entries []SharedEntry) bool {
