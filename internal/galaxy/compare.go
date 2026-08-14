@@ -190,19 +190,33 @@ func (g *Graph) genericCutoffFor(galaxies []string) int {
 	return cutoff
 }
 
-// comparableSet collects an entry's neighbours as a set, dropping the ones too
-// widely shared to distinguish anybody, and reporting how many were dropped
-// and whether the walk was cut short.
-func (g *Graph) comparableSet(uuid string, walk NeighbourOpts, includeGeneric bool) (map[string]SharedEntry, int, bool) {
+// countGeneric reports how many of an entry's neighbours the generic filter
+// keeps out, by walking once more without the block.
+func (g *Graph) countGeneric(uuid string, walk NeighbourOpts) int {
+	unfiltered := walk
+	unfiltered.MaxGroupCount = 0
+	n := 0
+	for _, nb := range g.Neighbours(uuid, unfiltered) {
+		if nb.Generic {
+			n++
+		}
+	}
+	return n
+}
+
+// comparableSet collects an entry's neighbours as a set, reporting whether the
+// walk was cut short.
+func (g *Graph) comparableSet(uuid string, walk NeighbourOpts, includeGeneric bool) (map[string]SharedEntry, bool) {
 	out := map[string]SharedEntry{}
-	dropped := 0
 	neighbours := g.Neighbours(uuid, walk)
 	for _, n := range neighbours {
 		if n.Dangling {
 			continue
 		}
+		// Belt and braces: the walk already refuses to reach these when the
+		// filter is on, but a galaxy without a derived threshold falls back to
+		// a fixed cutoff that may not match its own flagging.
 		if n.Generic && !includeGeneric {
-			dropped++
 			continue
 		}
 		out[n.UUID] = SharedEntry{
@@ -210,7 +224,7 @@ func (g *Graph) comparableSet(uuid string, walk NeighbourOpts, includeGeneric bo
 			GroupCount: n.GroupCount, Generic: n.Generic,
 		}
 	}
-	return out, dropped, len(neighbours) >= walk.Limit
+	return out, len(neighbours) >= walk.Limit
 }
 
 func allGeneric(entries []SharedEntry) bool {
