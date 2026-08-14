@@ -39,8 +39,9 @@ type Comparison struct {
 	AOnlyCount  int `json:"a_only_count"`
 	BOnlyCount  int `json:"b_only_count"`
 
-	// GenericExcluded counts what was dropped before comparing, so a caller
-	// can tell a genuinely thin overlap from one that was mostly noise.
+	// GenericExcluded counts the widely-shared neighbours the filter keeps out
+	// of the comparison, so a caller can tell a genuinely thin overlap from one
+	// that was mostly noise. Zero when IncludeGeneric is set.
 	GenericExcluded int `json:"generic_excluded"`
 
 	// Truncated marks a comparison scored over a ranked slice of a
