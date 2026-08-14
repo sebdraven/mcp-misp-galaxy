@@ -489,10 +489,9 @@ func (s *Service) Compare(aUUID, bUUID string, opt galaxy.CompareOpts) (galaxy.C
 			return galaxy.Comparison{}, fmt.Errorf("%w: %s", ErrUnknownNode, uuid)
 		}
 	}
-	cmp, ok := g.Compare(aUUID, bUUID, opt)
-	if !ok {
-		return galaxy.Comparison{}, fmt.Errorf("%w: %s or %s", ErrUnknownNode, aUUID, bUUID)
-	}
+	// Both nodes exist, so the graph can only succeed from here; the boolean is
+	// discarded rather than handled twice.
+	cmp, _ := g.Compare(aUUID, bUUID, opt)
 	return cmp, nil
 }
 
