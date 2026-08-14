@@ -98,14 +98,20 @@ func (g *Graph) Compare(aUUID, bUUID string, opt CompareOpts) (Comparison, bool)
 		// flagged generic are excluded rather than an arbitrary count.
 		walk.MaxGroupCount = g.genericCutoffFor(opt.Galaxies)
 	}
-	aSet, aGeneric, aTrunc := g.comparableSet(aUUID, walk, opt.IncludeGeneric)
-	bSet, bGeneric, bTrunc := g.comparableSet(bUUID, walk, opt.IncludeGeneric)
+	aSet, aTrunc := g.comparableSet(aUUID, walk, opt.IncludeGeneric)
+	bSet, bTrunc := g.comparableSet(bUUID, walk, opt.IncludeGeneric)
 
 	cmp := Comparison{
 		AUUID: a.UUID, AValue: a.Value,
 		BUUID: b.UUID, BValue: b.Value,
-		GenericExcluded: aGeneric + bGeneric,
-		Truncated:       aTrunc || bTrunc,
+		Truncated: aTrunc || bTrunc,
+	}
+	if !opt.IncludeGeneric {
+		// Counted by walking again without the block. Filtering during the walk
+		// means the generic entries are never reached, so there is nothing left
+		// to tally afterwards — and the figure is worth having: it separates a
+		// genuinely thin overlap from one that was mostly noise.
+		cmp.GenericExcluded = g.countGeneric(aUUID, walk) + g.countGeneric(bUUID, walk)
 	}
 
 	for uuid, entry := range aSet {
