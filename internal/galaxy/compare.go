@@ -81,14 +81,25 @@ func (g *Graph) Compare(aUUID, bUUID string, opt CompareOpts) (Comparison, bool)
 		opt.Limit = 100
 	}
 
-	walk := NeighbourOpts{Depth: opt.Depth, Limit: 2000, Galaxies: opt.Galaxies}
-	aSet, aGeneric := g.comparableSet(aUUID, walk, opt.IncludeGeneric)
-	bSet, bGeneric := g.comparableSet(bUUID, walk, opt.IncludeGeneric)
+	// The generic filter has to block traversal, not just hide results.
+	// Neighbours walks through a node it declines to report, so at depth > 1
+	// two entries could share everything reachable *via* the hub the filter was
+	// meant to neutralise — reintroducing the "everything looks related" effect
+	// by the back door. MaxGroupCount is what stops the walk at those nodes.
+	walk := NeighbourOpts{Depth: opt.Depth, Limit: maxCompareNeighbours, Galaxies: opt.Galaxies}
+	if !opt.IncludeGeneric {
+		// One below the galaxy's own generic threshold, so exactly the entries
+		// flagged generic are excluded rather than an arbitrary count.
+		walk.MaxGroupCount = g.genericCutoffFor(opt.Galaxies)
+	}
+	aSet, aGeneric, aTrunc := g.comparableSet(aUUID, walk, opt.IncludeGeneric)
+	bSet, bGeneric, bTrunc := g.comparableSet(bUUID, walk, opt.IncludeGeneric)
 
 	cmp := Comparison{
 		AUUID: a.UUID, AValue: a.Value,
 		BUUID: b.UUID, BValue: b.Value,
 		GenericExcluded: aGeneric + bGeneric,
+		Truncated:       aTrunc || bTrunc,
 	}
 
 	for uuid, entry := range aSet {
@@ -133,12 +144,54 @@ func (g *Graph) Compare(aUUID, bUUID string, opt CompareOpts) (Comparison, bool)
 	return cmp, true
 }
 
+// maxCompareNeighbours bounds each side of a comparison.
+//
+// Neighbours ranks before truncating, so a comparison that hits this cap is
+// scored over the best-ranked slice rather than the whole neighbourhood — which
+// is why Truncated is reported rather than left implicit.
+const maxCompareNeighbours = 2000
+
+// genericCutoffFor returns a MaxGroupCount that excludes exactly the entries
+// their own galaxy calls generic.
+//
+// Thresholds are per-galaxy, so with several in scope the lowest is used: it is
+// the only choice that never lets a generic entry through, and over-filtering a
+// denser galaxy is the safer error here.
+func (g *Graph) genericCutoffFor(galaxies []string) int {
+	cutoff := 0
+	consider := func(t int) {
+		if t <= 1 {
+			return
+		}
+		if cutoff == 0 || t-1 < cutoff {
+			cutoff = t - 1
+		}
+	}
+	if len(galaxies) > 0 {
+		for _, name := range galaxies {
+			if t, ok := g.GenericThreshold(name); ok {
+				consider(t)
+			}
+		}
+	} else {
+		for _, t := range g.thresholds {
+			consider(t)
+		}
+	}
+	if cutoff == 0 {
+		cutoff = GenericFallbackThreshold
+	}
+	return cutoff
+}
+
 // comparableSet collects an entry's neighbours as a set, dropping the ones too
-// widely shared to distinguish anybody, and reporting how many were dropped.
-func (g *Graph) comparableSet(uuid string, walk NeighbourOpts, includeGeneric bool) (map[string]SharedEntry, int) {
+// widely shared to distinguish anybody, and reporting how many were dropped
+// and whether the walk was cut short.
+func (g *Graph) comparableSet(uuid string, walk NeighbourOpts, includeGeneric bool) (map[string]SharedEntry, int, bool) {
 	out := map[string]SharedEntry{}
 	dropped := 0
-	for _, n := range g.Neighbours(uuid, walk) {
+	neighbours := g.Neighbours(uuid, walk)
+	for _, n := range neighbours {
 		if n.Dangling {
 			continue
 		}

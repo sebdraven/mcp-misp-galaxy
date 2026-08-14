@@ -161,6 +161,63 @@ func TestCompareRanksDiscriminatingEntriesFirst(t *testing.T) {
 	}
 }
 
+func TestCompareDoesNotRelateThroughGenericHubs(t *testing.T) {
+	// Hiding a generic entry from the results is not enough: if the walk still
+	// passes through it, two actors share everything on its far side and the
+	// filter achieves nothing at depth > 1. This is the same reasoning as
+	// MaxGroupCount on neighbours — a widely-used entry is a hub, and routing
+	// through it manufactures adjacency.
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Two actors whose only link is a technique everybody uses. Behind that
+	// technique sits a third actor and its own tooling.
+	actors := []map[string]any{
+		{"value": "Actor A", "uuid": "a-1", "related": []map[string]any{
+			{"dest-uuid": "t-hub", "type": "uses"},
+		}},
+		{"value": "Actor B", "uuid": "b-1", "related": []map[string]any{
+			{"dest-uuid": "t-hub", "type": "uses"},
+		}},
+	}
+	for i := 0; i < 12; i++ {
+		actors = append(actors, map[string]any{
+			"value": fmt.Sprintf("Bystander %d", i), "uuid": fmt.Sprintf("c-%d", i),
+			"related": []map[string]any{{"dest-uuid": "t-hub", "type": "uses"}},
+		})
+	}
+	writeCluster(t, clusters, "threat-actor", actors)
+	writeCluster(t, clusters, "mitre-attack-pattern", []map[string]any{
+		{"value": "Everyone Does This", "uuid": "t-hub"},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	hub, _ := g.Node("t-hub")
+	if hub.GroupCount != 14 {
+		t.Fatalf("fixture broken: the hub has %d actors, want 14", hub.GroupCount)
+	}
+
+	// At depth 2 the bystanders sit one hop past the hub. If the walk goes
+	// through it, A and B suddenly share twelve actors.
+	cmp, ok := g.Compare("a-1", "b-1", CompareOpts{Depth: 2})
+	if !ok {
+		t.Fatal("expected a comparison")
+	}
+	if cmp.SharedCount != 0 {
+		t.Errorf("nothing should be shared through a generic hub, got %d: %+v",
+			cmp.SharedCount, cmp.Shared)
+	}
+	if cmp.Similarity != 0 {
+		t.Errorf("similarity = %v, want 0", cmp.Similarity)
+	}
+}
+
 func TestCompareUnknownEntries(t *testing.T) {
 	g := compareGraph(t)
 	if _, ok := g.Compare("a-1", "nope", CompareOpts{}); ok {
