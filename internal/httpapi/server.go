@@ -23,6 +23,7 @@ func Handler(s *service.Service) http.Handler {
 	mux.HandleFunc("GET /refs/{uuid}", h.refs)
 	mux.HandleFunc("GET /profile/{uuid}", h.profile)
 	mux.HandleFunc("GET /cooccurrence", h.cooccurrence)
+	mux.HandleFunc("GET /compare", h.compare)
 	mux.HandleFunc("GET /cooccurrence/{uuid}", h.cooccurrence)
 	mux.HandleFunc("GET /neighbors/{uuid}", h.neighbours)
 	mux.HandleFunc("GET /path", h.path)
@@ -85,6 +86,17 @@ func (h *handlers) cooccurrence(w http.ResponseWriter, r *http.Request) {
 		r.PathValue("uuid"), r.URL.Query().Get("galaxy"),
 		minRate, intParam(r, "min_actors", 0), intParam(r, "limit", 0),
 	)
+	respond(w, res, err)
+}
+
+func (h *handlers) compare(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	res, err := h.s.Compare(q.Get("a"), q.Get("b"), galaxy.CompareOpts{
+		Depth:          intParam(r, "depth", 1),
+		Galaxies:       csv(q.Get("galaxy")),
+		IncludeGeneric: q.Get("include_generic") == "1" || q.Get("include_generic") == "true",
+		Limit:          intParam(r, "limit", 0),
+	})
 	respond(w, res, err)
 }
 
@@ -155,6 +167,8 @@ func respond(w http.ResponseWriter, payload any, err error) {
 	case errors.Is(err, service.ErrInvalidRate):
 		fail(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrCoOccurrenceScope):
+		fail(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, service.ErrCompareOperands), errors.Is(err, service.ErrCompareSame):
 		fail(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrUnknownNormalisation):
 		fail(w, http.StatusBadRequest, err.Error())
