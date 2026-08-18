@@ -16,6 +16,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -113,11 +114,21 @@ func main() {
 			fmt.Fprintln(os.Stderr, "corpus not checked out yet: cloning the full misp-galaxy history, this takes a while")
 		}
 		st, err := mgr.Sync()
-		if err != nil {
+		switch {
+		case errors.Is(err, corpus.ErrSyncFailed):
+			// A usable corpus is on disk, just not the pinned one. Refusing to
+			// start here would trade a slightly stale answer for no answer at
+			// all — and the commit actually loaded is reported everywhere, so
+			// nothing is passed off as current that is not.
+			log.Printf("warning: %v", err)
+			log.Printf("serving the corpus already on disk (commit %s); run `git submodule update --init %s` to fix",
+				short(st.Current), *submodule)
+		case err != nil:
 			log.Fatalf("submodule sync failed: %v\n"+
 				"hint: run `git submodule update --init %s` once, then retry with -no-sync", err, *submodule)
+		default:
+			log.Printf("corpus synced in %s (commit %s)", time.Since(start).Round(time.Millisecond), short(st.Current))
 		}
-		log.Printf("corpus synced in %s (commit %s)", time.Since(start).Round(time.Millisecond), short(st.Current))
 	} else if data == "" && !mgr.Available() {
 		// A baked-in corpus, as in a container image. Normal, but say so:
 		// nothing here can move the data, and provenance comes from
