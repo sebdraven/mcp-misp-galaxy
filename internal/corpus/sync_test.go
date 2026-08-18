@@ -1,6 +1,7 @@
 package corpus
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -68,16 +69,25 @@ func TestStatusReportsUsableCorpusWithoutGit(t *testing.T) {
 	}
 }
 
-func TestSyncIsANoOpWithoutARepository(t *testing.T) {
-	// Sync must not reach for the network to discover it has nothing to do.
-	// The naive version called Update unconditionally, and on a shallow clone
-	// that fetch fails with EOF — turning every boot into a network gamble.
+func TestSyncFailsWithoutARepository(t *testing.T) {
+	// Sync is a git operation, so it reports that git is unavailable rather
+	// than pretending to have synced. The caller decides whether to carry on
+	// with the data on disk — which is exactly what the container path does.
 	root := t.TempDir()
 	clustersIn(t, filepath.Join(root, SubmodulePath))
 	m, _ := NewManager(root, "")
 
-	if _, err := m.Sync(); err == nil {
-		t.Error("Sync without a repository should report that git is unavailable")
+	if _, err := m.Sync(); !errors.Is(err, ErrNoRepo) {
+		t.Errorf("Sync without a repository should report ErrNoRepo, got %v", err)
+	}
+
+	// And the corpus stays loadable: an unavailable git is not unusable data.
+	st, err := m.Status()
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if !st.Ready {
+		t.Error("the corpus on disk remains loadable even when git cannot run")
 	}
 }
 
