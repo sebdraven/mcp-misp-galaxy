@@ -64,6 +64,15 @@ func Register(s *mcp.Server, svc *service.Service) {
 	}, r.galaxies)
 
 	mcp.AddTool(s, &mcp.Tool{
+		Name: "gx_fuzzy",
+		Description: "Find entries whose names are CLOSE to a query without being equal — for typos and transliteration variants (Kimsuki for Kimsuky, Calisto for Callisto). " +
+			"Use it when gx_resolve returns nothing and you suspect a spelling problem, not as a way to discover related entities. " +
+			"Orthographic proximity is NOT identity, and in this corpus it is often the opposite: APT28 and APT29 are one character apart and are different actors. " +
+			"Every match carries a per-signal breakdown — read it rather than the score alone, and treat a match resting on edit distance with disagreeing digits as a warning rather than a find. " +
+			"Matches flagged 'blocked' have catalogue entries that disagree on a discriminating attribute such as attributed country; no similarity score overrides that.",
+	}, r.fuzzy)
+
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "gx_compare",
 		Description: "Compare two entries: what they share, what is unique to each, and a similarity score. " +
 			"Answers 'what do these two have in common' — two actors, two malware families, an actor and a family. " +
@@ -139,6 +148,13 @@ type neighboursInput struct {
 	SkipDangling  bool     `json:"skip_dangling,omitempty" jsonschema:"drop entries referenced by a relation but not defined in this checkout"`
 }
 
+type fuzzyInput struct {
+	Name          string   `json:"name" jsonschema:"the name to look for approximately"`
+	Galaxies      []string `json:"galaxies,omitempty" jsonschema:"restrict to these galaxy types; omit to use the server's CTI scope"`
+	MinSimilarity *float64 `json:"min_similarity,omitempty" jsonschema:"minimum composite similarity, 0 to 1. Omit for the default of 0.85, which is deliberately strict: actor names are short and share heavy prefixes by convention, so a lower floor turns every numbered family into a cluster of look-alikes"`
+	Limit         int      `json:"limit,omitempty" jsonschema:"max matches to return (default 20)"`
+}
+
 type compareInput struct {
 	A              string   `json:"a" jsonschema:"first entry UUID, as returned by gx_resolve"`
 	B              string   `json:"b" jsonschema:"second entry UUID"`
@@ -206,6 +222,11 @@ func (r *registry) neighbours(ctx context.Context, _ *mcp.CallToolRequest, in ne
 		WithPaths:     in.WithPaths,
 		SkipGhosts:    in.SkipDangling,
 	})
+	return nil, res, err
+}
+
+func (r *registry) fuzzy(ctx context.Context, _ *mcp.CallToolRequest, in fuzzyInput) (*mcp.CallToolResult, service.FuzzyResult, error) {
+	res, err := r.svc.Fuzzy(in.Name, in.Galaxies, in.MinSimilarity, in.Limit)
 	return nil, res, err
 }
 
