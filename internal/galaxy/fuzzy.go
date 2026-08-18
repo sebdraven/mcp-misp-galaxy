@@ -248,20 +248,43 @@ func (n *Node) metaStrings() map[string]string {
 }
 
 func (s NameSignals) composite() float64 {
-	score := weightJaroWinkler*s.JaroWinkler +
-		weightLevenshtein*s.Levenshtein +
-		weightTokenOverlap*s.TokenOverlap +
-		weightAbbreviation*s.Abbreviation +
-		weightDigitMatch*s.DigitMatch
+	// Only applicable signals contribute, with the weights renormalised over
+	// them. A signal that cannot say anything about a pair must not be counted
+	// as saying "nothing in common".
+	type term struct {
+		value  float64
+		weight float64
+	}
+	terms := []term{
+		{s.JaroWinkler, weightJaroWinkler},
+		{s.Levenshtein, weightLevenshtein},
+		{s.DigitMatch, weightDigitMatch},
+	}
+	for _, name := range s.Applied {
+		switch name {
+		case "token_overlap":
+			terms = append(terms, term{s.TokenOverlap, weightTokenOverlap})
+		case "abbreviation":
+			terms = append(terms, term{s.Abbreviation, weightAbbreviation})
+		}
+	}
+
+	var sum, totalWeight float64
+	var max float64
+	for _, t := range terms {
+		sum += t.value * t.weight
+		totalWeight += t.weight
+		if t.value > max {
+			max = t.value
+		}
+	}
+	if totalWeight == 0 {
+		return 0
+	}
+	score := sum / totalWeight
 
 	// Strong-signal boost, as the literature applies it: one signal at 0.90 or
 	// above should not be dragged under by the others.
-	max := s.JaroWinkler
-	for _, v := range []float64{s.Levenshtein, s.TokenOverlap, s.Abbreviation, s.DigitMatch} {
-		if v > max {
-			max = v
-		}
-	}
 	if max >= 0.90 && score < 0.8*max {
 		score = 0.8 * max
 	}
