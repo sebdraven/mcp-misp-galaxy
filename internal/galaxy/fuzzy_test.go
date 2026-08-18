@@ -21,7 +21,9 @@ func fuzzyGraph(t *testing.T) *Graph {
 		{"value": "APT28", "uuid": "a-apt28", "meta": map[string]any{"country": "RU"}},
 		{"value": "APT29", "uuid": "a-apt29", "meta": map[string]any{"country": "RU"}},
 		{"value": "Callisto", "uuid": "a-callisto", "meta": map[string]any{"country": "RU"}},
-		{"value": "Calisto Group", "uuid": "a-calisto", "meta": map[string]any{"country": "CN"}},
+		// The misspelling the naming literature documents, and a country its own
+		// catalogue disagrees on — one letter apart, two different entities.
+		{"value": "Calisto", "uuid": "a-calisto", "meta": map[string]any{"country": "CN"}},
 	})
 	g, err := Load(root, "deadbeef")
 	if err != nil {
