@@ -11,6 +11,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -78,7 +79,12 @@ func main() {
 			fmt.Fprintln(os.Stderr, "corpus not checked out yet: cloning the full misp-galaxy history, this takes a while")
 		}
 		if _, err := mgr.Sync(); err != nil {
-			log.Fatalf("submodule sync failed: %v", err)
+			if errors.Is(err, corpus.ErrSyncFailed) {
+				// Usable data is there; an older corpus beats no UI at all.
+				fmt.Fprintf(os.Stderr, "warning: %v\nserving the corpus already on disk\n", err)
+			} else {
+				log.Fatalf("submodule sync failed: %v", err)
+			}
 		}
 	}
 
