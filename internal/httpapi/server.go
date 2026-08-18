@@ -19,6 +19,7 @@ func Handler(s *service.Service) http.Handler {
 	h := &handlers{s: s}
 
 	mux.HandleFunc("GET /resolve", h.resolve)
+	mux.HandleFunc("GET /fuzzy", h.fuzzy)
 	mux.HandleFunc("GET /node/{uuid}", h.node)
 	mux.HandleFunc("GET /refs/{uuid}", h.refs)
 	mux.HandleFunc("GET /profile/{uuid}", h.profile)
@@ -51,6 +52,21 @@ func (h *handlers) resolve(w http.ResponseWriter, r *http.Request) {
 	}
 	group := q.Get("group") == "1" || q.Get("group") == "true"
 	res, err := h.s.Resolve(name, csv(q.Get("galaxy")), intParam(r, "limit", 0), group, q.Get("normalisation"))
+	respond(w, res, err)
+}
+
+func (h *handlers) fuzzy(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	var minSim *float64
+	if v := q.Get("min_similarity"); v != "" {
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			fail(w, http.StatusBadRequest, "min_similarity must be a number between 0 and 1")
+			return
+		}
+		minSim = &f
+	}
+	res, err := h.s.Fuzzy(q.Get("q"), csv(q.Get("galaxy")), minSim, intParam(r, "limit", 0))
 	respond(w, res, err)
 }
 
@@ -169,6 +185,8 @@ func respond(w http.ResponseWriter, payload any, err error) {
 	case errors.Is(err, service.ErrCoOccurrenceScope):
 		fail(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrCompareOperands), errors.Is(err, service.ErrCompareSame):
+		fail(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, service.ErrEmptyQuery), errors.Is(err, service.ErrInvalidSimilarity):
 		fail(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrUnknownNormalisation):
 		fail(w, http.StatusBadRequest, err.Error())
