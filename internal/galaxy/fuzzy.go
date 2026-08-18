@@ -14,12 +14,23 @@ import (
 // different claim from one resting on token overlap alone, and an opaque number
 // hides that. The CTI naming literature is full of pairs that score well for
 // the wrong reason.
+//
+// Not every signal applies to every pair. A single-word name has no token
+// structure and no abbreviation to detect, and scoring those as 0 would be a
+// verdict where there is no evidence — it drags a genuine typo like
+// Kimsuki/Kimsuky down to 0.70 purely because the names are one word long.
+// Inapplicable signals are marked and left out of the weighted average, and
+// the remaining weights are renormalised.
 type NameSignals struct {
 	JaroWinkler  float64 `json:"jaro_winkler"`
 	Levenshtein  float64 `json:"levenshtein" jsonschema:"1 minus the edit distance normalised by the longer string"`
-	TokenOverlap float64 `json:"token_overlap" jsonschema:"word-level Jaccard, robust to reordered tokens"`
-	Abbreviation float64 `json:"abbreviation" jsonschema:"confidence that one name abbreviates the other; requires an actual single-letter token, not merely a shared first letter"`
+	TokenOverlap float64 `json:"token_overlap,omitempty" jsonschema:"word-level Jaccard, robust to reordered tokens. Omitted when neither name has more than one token"`
+	Abbreviation float64 `json:"abbreviation,omitempty" jsonschema:"confidence that one name abbreviates the other; requires an actual single-letter token, not merely a shared first letter. Omitted when neither name contains one"`
 	DigitMatch   float64 `json:"digit_match" jsonschema:"agreement on the numbers in the names. APT28 and APT29 differ here, which is the whole point"`
+
+	// Applied lists the signals that carried weight, so a caller can see that
+	// a score rests on two measures rather than five.
+	Applied []string `json:"applied"`
 }
 
 // Signal weights for the composite score.
@@ -260,15 +271,42 @@ func (s NameSignals) composite() float64 {
 	return score
 }
 
-// scoreName computes every signal for a pair of already-normalised keys.
+// scoreName computes every applicable signal for a pair of normalised keys.
 func scoreName(a, b string) NameSignals {
-	return NameSignals{
-		JaroWinkler:  jaroWinkler(a, b),
-		Levenshtein:  levenshteinRatio(a, b),
-		TokenOverlap: tokenOverlap(a, b),
-		Abbreviation: abbreviationConfidence(a, b),
-		DigitMatch:   digitAgreement(a, b),
+	s := NameSignals{
+		JaroWinkler: jaroWinkler(a, b),
+		Levenshtein: levenshteinRatio(a, b),
+		DigitMatch:  digitAgreement(a, b),
+		Applied:     []string{"jaro_winkler", "levenshtein", "digit_match"},
 	}
+
+	// Token overlap needs token structure on at least one side; on two
+	// single-word names it can only ever return 0 or 1, and a one-character
+	// typo makes it 0.
+	ta, tb := strings.Fields(spaceOut(a)), strings.Fields(spaceOut(b))
+	if len(ta) > 1 || len(tb) > 1 {
+		s.TokenOverlap = tokenOverlap(a, b)
+		s.Applied = append(s.Applied, "token_overlap")
+	}
+
+	// Abbreviation needs an actual single-letter token somewhere.
+	if hasInitial(ta) || hasInitial(tb) {
+		s.Abbreviation = abbreviationConfidence(a, b)
+		s.Applied = append(s.Applied, "abbreviation")
+	}
+	return s
+}
+
+func hasInitial(tokens []string) bool {
+	if len(tokens) < 2 {
+		return false
+	}
+	for _, t := range tokens {
+		if len([]rune(t)) == 1 {
+			return true
+		}
+	}
+	return false
 }
 
 // digitAgreement compares the numbers in two names.
