@@ -529,9 +529,10 @@ func (s *Service) MostGeneric(galaxyType string, limit int) (GenericResult, erro
 
 // StatusResult combines graph stats with the state of the data checkout.
 type StatusResult struct {
-	Loaded bool         `json:"loaded"`
-	Stats  galaxy.Stats `json:"stats"`
-	Corpus corpus.State `json:"corpus"`
+	Loaded  bool         `json:"loaded"`
+	Stats   galaxy.Stats `json:"stats"`
+	Corpus  corpus.State `json:"corpus"`
+	Warning string       `json:"warning,omitempty" jsonschema:"set when the corpus could not be synced but a usable one was already on disk; the commit reported is what actually answered"`
 }
 
 // Status reports both halves: what is in memory, and what is on disk.
@@ -592,14 +593,27 @@ func corpusRefFromBuild(dataDir string) string {
 }
 
 // Sync brings the checkout back to the pinned commit, then reloads.
+//
+// A sync that fails while leaving usable data on disk is reported in the
+// result rather than as an error: the caller asked to refresh, and telling
+// them "it did not refresh, here is what you have" is more useful than an
+// error that says nothing about the state they are left in.
 func (s *Service) Sync() (StatusResult, error) {
+	syncErr := error(nil)
 	if _, err := s.mgr.Sync(); err != nil {
-		return StatusResult{}, err
+		if !errors.Is(err, corpus.ErrSyncFailed) {
+			return StatusResult{}, err
+		}
+		syncErr = err
 	}
 	if _, err := s.Reload(); err != nil {
 		return StatusResult{}, err
 	}
-	return s.Status(), nil
+	out := s.Status()
+	if syncErr != nil {
+		out.Warning = syncErr.Error()
+	}
+	return out, nil
 }
 
 // Advance moves the checkout to the remote tip, then reloads. Never called

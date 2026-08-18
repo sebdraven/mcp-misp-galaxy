@@ -98,9 +98,34 @@ func (m *Manager) Status() (State, error) {
 	return s, nil
 }
 
-// Sync initialises the submodule if needed and checks out the pinned commit.
-// Safe to call on every start: when everything already matches it does nothing.
+// ErrSyncFailed wraps a synchronisation that could not complete but left a
+// usable corpus on disk. The caller can carry on with what is there.
+var ErrSyncFailed = errors.New("corpus: could not sync the submodule")
+
+// Sync brings the submodule to the commit the parent repository pins.
+//
+// It does nothing at all when the checkout already matches, which is the case
+// at almost every start. That shortcut is not just an optimisation: go-git's
+// Update fetches whenever it is unsure it holds the target commit, and on the
+// shallow clone this submodule normally is, that fetch cannot succeed — the
+// remote closes the connection mid-negotiation and go-git reports EOF. So the
+// naive "always Update" made every boot depend on a network call that was
+// pointless when in sync and doomed when not.
+//
+// When the checkout IS behind — after the parent bumps the pointer — an update
+// is attempted, and a failure is reported rather than returned as fatal if the
+// data on disk is still loadable. Serving a slightly older corpus beats
+// serving nothing, and the commit actually loaded is reported everywhere, so
+// nobody is misled about which corpus answered.
 func (m *Manager) Sync() (State, error) {
+	st, err := m.Status()
+	if err != nil {
+		return State{}, err
+	}
+	if st.InSync && st.Ready {
+		return st, nil
+	}
+
 	sub, err := m.submodule()
 	if err != nil {
 		return State{}, err
@@ -110,11 +135,24 @@ func (m *Manager) Sync() (State, error) {
 	if err := sub.Init(); err != nil && !errors.Is(err, git.ErrSubmoduleAlreadyInitialized) {
 		return State{}, fmt.Errorf("corpus: submodule init: %w", err)
 	}
-	if err := sub.Update(&git.SubmoduleUpdateOptions{Init: true}); err != nil &&
-		!errors.Is(err, git.NoErrAlreadyUpToDate) {
-		return State{}, fmt.Errorf("corpus: submodule update: %w", err)
+	updateErr := sub.Update(&git.SubmoduleUpdateOptions{Init: true})
+	if updateErr != nil && errors.Is(updateErr, git.NoErrAlreadyUpToDate) {
+		updateErr = nil
 	}
-	return m.Status()
+
+	st, statusErr := m.Status()
+	if statusErr != nil {
+		return State{}, statusErr
+	}
+	if updateErr == nil {
+		return st, nil
+	}
+	if st.Ready {
+		// Degraded, not broken: the caller decides whether an older corpus is
+		// good enough, and it usually is.
+		return st, fmt.Errorf("%w: %w", ErrSyncFailed, updateErr)
+	}
+	return State{}, fmt.Errorf("corpus: submodule update: %w", updateErr)
 }
 
 // Advance fetches the submodule's remote and moves the checkout to the tip of
