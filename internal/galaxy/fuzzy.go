@@ -15,8 +15,8 @@ import (
 // hides that. The CTI naming literature is full of pairs that score well for
 // the wrong reason.
 type NameSignals struct {
-	JaroWinkler float64 `json:"jaro_winkler"`
-	Levenshtein float64 `json:"levenshtein" jsonschema:"1 minus the edit distance normalised by the longer string"`
+	JaroWinkler  float64 `json:"jaro_winkler"`
+	Levenshtein  float64 `json:"levenshtein" jsonschema:"1 minus the edit distance normalised by the longer string"`
 	TokenOverlap float64 `json:"token_overlap" jsonschema:"word-level Jaccard, robust to reordered tokens"`
 	Abbreviation float64 `json:"abbreviation" jsonschema:"confidence that one name abbreviates the other; requires an actual single-letter token, not merely a shared first letter"`
 	DigitMatch   float64 `json:"digit_match" jsonschema:"agreement on the numbers in the names. APT28 and APT29 differ here, which is the whole point"`
