@@ -535,7 +535,7 @@ func (s *Service) Fuzzy(q string, galaxies []string, minSimilarity *float64, lim
 	}
 
 	matches := g.FuzzyResolve(q, galaxy.FuzzyOpts{
-		Galaxies: scope, MinSimilarity: threshold, Limit: limit,
+		Galaxies: scope, MinSimilarity: &threshold, Limit: limit,
 	})
 	res := FuzzyResult{
 		Query: q, MinSimilarity: threshold, Scope: scope,

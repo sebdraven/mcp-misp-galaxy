@@ -82,9 +82,15 @@ type FuzzyMatch struct {
 
 // FuzzyOpts tunes an approximate search.
 type FuzzyOpts struct {
-	Galaxies      []string
-	MinSimilarity float64
-	Limit         int
+	Galaxies []string
+
+	// MinSimilarity is a pointer so that "unset" and "0" stay distinguishable:
+	// 0 is a legitimate threshold meaning "report every candidate the blocking
+	// filter admits", and folding it into the default would make a documented
+	// value unreachable.
+	MinSimilarity *float64
+
+	Limit int
 }
 
 // FuzzyResolve finds entries whose names are close to q without being equal.
@@ -100,8 +106,9 @@ func (g *Graph) FuzzyResolve(q string, opt FuzzyOpts) []FuzzyMatch {
 	if key == "" {
 		return nil
 	}
-	if opt.MinSimilarity <= 0 {
-		opt.MinSimilarity = FuzzyThreshold
+	threshold := FuzzyThreshold
+	if opt.MinSimilarity != nil {
+		threshold = *opt.MinSimilarity
 	}
 	if opt.Limit <= 0 {
 		opt.Limit = 20
