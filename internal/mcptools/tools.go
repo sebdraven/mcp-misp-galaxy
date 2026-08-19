@@ -64,6 +64,14 @@ func Register(s *mcp.Server, svc *service.Service) {
 	}, r.galaxies)
 
 	mcp.AddTool(s, &mcp.Tool{
+		Name: "gx_draft_entry",
+		Description: "Prepare a new cluster entry for contribution to misp-galaxy: checks the name is not already taken, generates a UUID, and returns the JSON block ready to paste. " +
+			"The check is the point, not the UUID. A name added without verifying it is new is how a corpus ends up with five names for one thing and no way to tell aliases from distinct entities — the drafting is refused outright on an exact collision, canonical or synonym, anywhere in the corpus. " +
+			"Near-matches are reported without blocking, because close names are frequently different actors, but they are what a reviewer will ask about. " +
+			"Declare 'used_by' only when the attribution is documented; an entry with no credible actor is better filed unlinked than tied to a guess.",
+	}, r.draft)
+
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "gx_fuzzy",
 		Description: "Find entries whose names are CLOSE to a query without being equal — for typos and transliteration variants (Kimsuki for Kimsuky, Calisto for Callisto). " +
 			"Use it when gx_resolve returns nothing and you suspect a spelling problem, not as a way to discover related entities. " +
@@ -148,6 +156,16 @@ type neighboursInput struct {
 	SkipDangling  bool     `json:"skip_dangling,omitempty" jsonschema:"drop entries referenced by a relation but not defined in this checkout"`
 }
 
+type draftInput struct {
+	Name        string   `json:"name" jsonschema:"the value of the new entry, as the source names it"`
+	Galaxy      string   `json:"galaxy" jsonschema:"target galaxy, e.g. tool for malware and adversary tooling, threat-actor for groups"`
+	Description string   `json:"description,omitempty" jsonschema:"what the entry is, attributed to its source. State the naming situation when vendors disagree — a reviewer would rather read it than discover it"`
+	Refs        []string `json:"refs,omitempty" jsonschema:"URLs of the reports documenting this. The first should be the source that named it"`
+	Date        string   `json:"date,omitempty" jsonschema:"when it was first documented, e.g. 'August 2026.'"`
+	UsedBy      string   `json:"used_by,omitempty" jsonschema:"UUID of the threat actor to link this to, if the attribution is documented"`
+	Confidence  string   `json:"confidence,omitempty" jsonschema:"estimative-language tag on that relation: almost-no-chance, very-unlikely, unlikely, roughly-even-chance, likely (default), very-likely, almost-certain"`
+}
+
 type fuzzyInput struct {
 	Name          string   `json:"name" jsonschema:"the name to look for approximately"`
 	Galaxies      []string `json:"galaxies,omitempty" jsonschema:"restrict to these galaxy types; omit to use the server's CTI scope"`
@@ -221,6 +239,19 @@ func (r *registry) neighbours(ctx context.Context, _ *mcp.CallToolRequest, in ne
 		Limit:         in.Limit,
 		WithPaths:     in.WithPaths,
 		SkipGhosts:    in.SkipDangling,
+	})
+	return nil, res, err
+}
+
+func (r *registry) draft(ctx context.Context, _ *mcp.CallToolRequest, in draftInput) (*mcp.CallToolResult, service.DraftResult, error) {
+	res, err := r.svc.Draft(galaxy.DraftOpts{
+		Name:        in.Name,
+		Galaxy:      in.Galaxy,
+		Description: in.Description,
+		Refs:        in.Refs,
+		Date:        in.Date,
+		UsedBy:      in.UsedBy,
+		Confidence:  in.Confidence,
 	})
 	return nil, res, err
 }
