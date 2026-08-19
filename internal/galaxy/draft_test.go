@@ -184,6 +184,39 @@ func TestDraftJSONRoundTrips(t *testing.T) {
 	}
 }
 
+func TestDraftRejectsUnknownGalaxy(t *testing.T) {
+	// Echoing back whatever galaxy was asked for would hand out JSON destined
+	// for a cluster file that does not exist, and the mistake would only
+	// surface as a failed paste.
+	g := draftGraph(t)
+	if _, err := g.DraftClusterEntry(DraftOpts{Name: "CoolClient", Galaxy: "tools"}); err == nil {
+		t.Error("expected an error for a galaxy that is not in the corpus")
+	}
+	// Case and surrounding space should not matter, though.
+	res, err := g.DraftClusterEntry(DraftOpts{Name: "CoolClient", Galaxy: "  Tool "})
+	if err != nil {
+		t.Fatalf("a known galaxy in another case should resolve: %v", err)
+	}
+	if res.Galaxy != "tool" {
+		t.Errorf("the corpus spelling should come back, got %q", res.Galaxy)
+	}
+}
+
+func TestDraftRelationMustPointAtAnActor(t *testing.T) {
+	// used-by runs from a tool to the actor wielding it. Pointing it at another
+	// tool parses fine and means nothing, which is worse than failing.
+	g := draftGraph(t)
+	_, err := g.DraftClusterEntry(DraftOpts{
+		Name: "CoolClient", Galaxy: "tool", UsedBy: "t-plugx",
+	})
+	if err == nil {
+		t.Fatal("expected an error when the relation target is not an actor")
+	}
+	if !strings.Contains(err.Error(), "threat actors") {
+		t.Errorf("the error should say why, got %v", err)
+	}
+}
+
 func TestDraftRequiresNameAndGalaxy(t *testing.T) {
 	g := draftGraph(t)
 	if _, err := g.DraftClusterEntry(DraftOpts{Galaxy: "tool"}); err == nil {
