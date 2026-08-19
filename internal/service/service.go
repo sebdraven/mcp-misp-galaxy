@@ -559,6 +559,31 @@ func (s *Service) Fuzzy(q string, galaxies []string, minSimilarity *float64, lim
 	return res, nil
 }
 
+// DraftResult wraps a prepared cluster entry with the rendered JSON.
+type DraftResult struct {
+	galaxy.DraftResult
+	JSON string `json:"json,omitempty" jsonschema:"the entry rendered as the corpus formats it, ready to paste into the galaxy's values array"`
+}
+
+// Draft prepares a cluster entry for contribution to misp-galaxy.
+func (s *Service) Draft(opt galaxy.DraftOpts) (DraftResult, error) {
+	g, err := s.graph()
+	if err != nil {
+		return DraftResult{}, err
+	}
+	inner, err := g.DraftClusterEntry(opt)
+	if err != nil {
+		return DraftResult{}, err
+	}
+	out := DraftResult{DraftResult: inner}
+	if inner.Entry != nil {
+		if out.JSON, err = galaxy.MarshalDraft(inner.Entry); err != nil {
+			return DraftResult{}, err
+		}
+	}
+	return out, nil
+}
+
 // Galaxies lists the galaxies in the checkout.
 func (s *Service) Galaxies() ([]galaxy.GalaxyInfo, error) {
 	g, err := s.graph()
