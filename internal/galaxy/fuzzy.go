@@ -137,22 +137,23 @@ func (g *Graph) FuzzyResolve(q string, opt FuzzyOpts) []FuzzyMatch {
 		if indexed == key {
 			return // exact matches belong to Resolve, not here
 		}
-		if abs(len(indexed)-len(key)) > maxLenGap {
+		if abs(len([]rune(indexed))-queryLen) > maxLenGap {
 			return
 		}
-		sig := scoreName(key, indexed)
+		// Character signals score the normalised keys; token signals score the
+		// raw names, which still have the word boundaries normalisation drops.
+		sig := scoreName(key, indexed, q, candidate)
 		score := sig.composite()
-		if score < opt.MinSimilarity {
+		if score < threshold {
 			return
 		}
 		if prev, ok := seen[n]; ok && prev.Similarity >= score {
 			return
 		}
-		m := FuzzyMatch{
+		seen[n] = FuzzyMatch{
 			UUID: n.UUID, Tag: n.Tag(), Value: n.Value, Galaxy: n.Galaxy,
 			Matched: candidate, Similarity: score, Signals: sig,
 		}
-		seen[n] = m
 	}
 
 	for indexed, nodes := range g.index {
@@ -306,30 +307,65 @@ func (s NameSignals) composite() float64 {
 	return score
 }
 
-// scoreName computes every applicable signal for a pair of normalised keys.
-func scoreName(a, b string) NameSignals {
+// scoreName computes every applicable signal for a pair.
+//
+// Takes both forms on purpose. Character signals compare the normalised keys,
+// where APT-28 and APT 28 have already folded together. Token signals compare
+// the RAW names, because normalisation strips the very whitespace they need:
+// on the keys, "Calisto Group" is one token and no word-level measure can say
+// anything about it.
+func scoreName(keyA, keyB, rawA, rawB string) NameSignals {
 	s := NameSignals{
-		JaroWinkler: jaroWinkler(a, b),
-		Levenshtein: levenshteinRatio(a, b),
-		DigitMatch:  digitAgreement(a, b),
+		JaroWinkler: jaroWinkler(keyA, keyB),
+		Levenshtein: levenshteinRatio(keyA, keyB),
+		DigitMatch:  digitAgreement(keyA, keyB),
 		Applied:     []string{"jaro_winkler", "levenshtein", "digit_match"},
 	}
 
-	// Token overlap needs token structure on at least one side; on two
-	// single-word names it can only ever return 0 or 1, and a one-character
-	// typo makes it 0.
-	ta, tb := strings.Fields(spaceOut(a)), strings.Fields(spaceOut(b))
+	ta, tb := tokenise(rawA), tokenise(rawB)
+
+	// Token overlap needs token structure on at least one side; between two
+	// single-word names it can only return 0 or 1, and a one-character typo
+	// makes it 0 — a verdict where there is no evidence.
 	if len(ta) > 1 || len(tb) > 1 {
-		s.TokenOverlap = tokenOverlap(a, b)
+		s.TokenOverlap = tokenOverlapOf(ta, tb)
 		s.Applied = append(s.Applied, "token_overlap")
 	}
 
 	// Abbreviation needs an actual single-letter token somewhere.
 	if hasInitial(ta) || hasInitial(tb) {
-		s.Abbreviation = abbreviationConfidence(a, b)
+		s.Abbreviation = abbreviationOf(ta, tb)
 		s.Applied = append(s.Applied, "abbreviation")
 	}
 	return s
+}
+
+// tokenise splits a raw name into lower-cased word tokens, treating a run of
+// digits as a token of its own so APT28 yields [apt 28].
+func tokenise(s string) []string {
+	var out []string
+	var cur strings.Builder
+	var prevDigit bool
+	flush := func() {
+		if cur.Len() > 0 {
+			out = append(out, cur.String())
+			cur.Reset()
+		}
+	}
+	for _, r := range s {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			if cur.Len() > 0 && unicode.IsDigit(r) != prevDigit {
+				flush()
+			}
+			cur.WriteRune(unicode.ToLower(r))
+			prevDigit = unicode.IsDigit(r)
+		default:
+			flush()
+		}
+	}
+	flush()
+	return out
 }
 
 func hasInitial(tokens []string) bool {
@@ -377,15 +413,13 @@ func digitsOf(s string) string {
 	return b.String()
 }
 
-// abbreviationConfidence reports whether one name genuinely abbreviates the
-// other.
+// abbreviationOf reports whether one name genuinely abbreviates the other.
 //
 // A shared first letter is NOT an abbreviation. The literature documents this
 // exact bug: a scorer that accepted any first-letter agreement rated "Michael
 // Cruz" against "Mario Chavez" at 0.92 and produced 79 false positives. At
 // least one part-pair must involve an actual single-character token.
-func abbreviationConfidence(a, b string) float64 {
-	ta, tb := strings.Fields(spaceOut(a)), strings.Fields(spaceOut(b))
+func abbreviationOf(ta, tb []string) float64 {
 	if len(ta) != len(tb) || len(ta) == 0 {
 		return 0
 	}
@@ -395,9 +429,9 @@ func abbreviationConfidence(a, b string) float64 {
 		switch {
 		case p == q:
 			continue
-		case len(p) == 1 && strings.HasPrefix(q, p):
+		case len([]rune(p)) == 1 && strings.HasPrefix(q, p):
 			sawAbbrev = true
-		case len(q) == 1 && strings.HasPrefix(p, q):
+		case len([]rune(q)) == 1 && strings.HasPrefix(p, q):
 			sawAbbrev = true
 		default:
 			return 0 // a part-pair that is neither equal nor an abbreviation
@@ -409,53 +443,41 @@ func abbreviationConfidence(a, b string) float64 {
 	return 1
 }
 
-// spaceOut re-inserts boundaries a normalised key has lost, so token-level
-// signals have something to work with. Digits are treated as their own token:
-// "apt28" becomes "apt 28".
-func spaceOut(s string) string {
-	var b strings.Builder
-	var prev rune
-	for i, r := range s {
-		if i > 0 && unicode.IsDigit(r) != unicode.IsDigit(prev) {
-			b.WriteRune(' ')
-		}
-		b.WriteRune(r)
-		prev = r
+func tokenOverlapOf(ta, tb []string) float64 {
+	sa := map[string]bool{}
+	for _, t := range ta {
+		sa[t] = true
 	}
-	return b.String()
-}
-
-func tokenOverlap(a, b string) float64 {
-	ta := map[string]bool{}
-	for _, t := range strings.Fields(spaceOut(a)) {
-		ta[t] = true
+	sb := map[string]bool{}
+	for _, t := range tb {
+		sb[t] = true
 	}
-	tb := map[string]bool{}
-	for _, t := range strings.Fields(spaceOut(b)) {
-		tb[t] = true
-	}
-	if len(ta) == 0 || len(tb) == 0 {
+	if len(sa) == 0 || len(sb) == 0 {
 		return 0
 	}
 	shared := 0
-	for t := range ta {
-		if tb[t] {
+	for t := range sa {
+		if sb[t] {
 			shared++
 		}
 	}
-	union := len(ta) + len(tb) - shared
+	union := len(sa) + len(sb) - shared
 	return float64(shared) / float64(union)
 }
 
 // levenshteinRatio is 1 minus the edit distance normalised by the longer input.
+//
+// Lengths in runes, matching the distance itself: normalise keeps any Unicode
+// letter, so a byte count would skew every non-ASCII comparison.
 func levenshteinRatio(a, b string) float64 {
 	if a == b {
 		return 1
 	}
-	d := levenshtein([]rune(a), []rune(b))
-	longer := len(a)
-	if len(b) > longer {
-		longer = len(b)
+	ra, rb := []rune(a), []rune(b)
+	d := levenshtein(ra, rb)
+	longer := len(ra)
+	if len(rb) > longer {
+		longer = len(rb)
 	}
 	if longer == 0 {
 		return 1

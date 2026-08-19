@@ -86,9 +86,30 @@ func TestFuzzyDigitSignalIsDecisive(t *testing.T) {
 	}
 
 	// And the same names with the same number stay together.
-	same := scoreName("apt28", "apt 28")
+	same := scoreName("apt28", "apt28", "APT28", "APT 28")
 	if same.DigitMatch != 1 {
 		t.Errorf("identical digits should score 1, got %v", same.DigitMatch)
+	}
+}
+
+func TestTokenSignalsUseRawNames(t *testing.T) {
+	// Normalisation drops whitespace, so token-level signals scored on the
+	// keys would see one token and say nothing. They score the raw names.
+	sig := scoreName(
+		normalise("Calisto Group"), normalise("Callisto Group"),
+		"Calisto Group", "Callisto Group",
+	)
+	var applied bool
+	for _, name := range sig.Applied {
+		if name == "token_overlap" {
+			applied = true
+		}
+	}
+	if !applied {
+		t.Fatal("two-word names should have token overlap applied")
+	}
+	if sig.TokenOverlap == 0 {
+		t.Error("the shared word should register; scoring the keys would give 0")
 	}
 }
 
@@ -126,11 +147,11 @@ func TestAbbreviationNeedsARealAbbreviation(t *testing.T) {
 	// The documented bug worth not repeating: a scorer that accepted any
 	// shared first letter rated "Michael Cruz" against "Mario Chavez" at 0.92
 	// and produced 79 false positives.
-	if got := abbreviationConfidence("michaelcruz", "mariochavez"); got != 0 {
+	if got := abbreviationOf(tokenise("Michael Cruz"), tokenise("Mario Chavez")); got != 0 {
 		t.Errorf("shared first letters are not an abbreviation, got %v", got)
 	}
 	// A genuine one still matches: a single-letter token standing for a word.
-	if got := abbreviationConfidence("e petrov", "elena petrov"); got != 1 {
+	if got := abbreviationOf(tokenise("E. Petrov"), tokenise("Elena Petrov")); got != 1 {
 		t.Errorf("a real abbreviation should score 1, got %v", got)
 	}
 }
