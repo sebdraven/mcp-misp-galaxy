@@ -105,6 +105,21 @@ func (g *Graph) DraftClusterEntry(opt DraftOpts) (DraftResult, error) {
 	if galaxyType == "" {
 		return DraftResult{}, fmt.Errorf("a target galaxy is required")
 	}
+	// Resolved against the corpus rather than taken on trust: a typo like
+	// "tools" would otherwise yield a JSON block for a cluster file that does
+	// not exist, and the error would surface as a failed paste rather than as a
+	// wrong galaxy.
+	canonical := ""
+	for _, info := range g.Galaxies() {
+		if strings.EqualFold(info.Type, galaxyType) {
+			canonical = info.Type
+			break
+		}
+	}
+	if canonical == "" {
+		return DraftResult{}, fmt.Errorf("no galaxy %q in this corpus; call gx_galaxies for the list", galaxyType)
+	}
+	galaxyType = canonical
 
 	res := DraftResult{Name: name, Galaxy: galaxyType}
 
