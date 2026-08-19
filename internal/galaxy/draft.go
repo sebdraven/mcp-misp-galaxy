@@ -172,13 +172,21 @@ func (g *Graph) DraftClusterEntry(opt DraftOpts) (DraftResult, error) {
 		Value:       name,
 	}
 
-	if opt.UsedBy != "" {
-		target, ok := g.Node(opt.UsedBy)
+	if usedBy := strings.TrimSpace(opt.UsedBy); usedBy != "" {
+		target, ok := g.Node(usedBy)
 		if !ok {
-			return DraftResult{}, fmt.Errorf("no entry with uuid %s to link to", opt.UsedBy)
+			return DraftResult{}, fmt.Errorf("no entry with uuid %s to link to", usedBy)
 		}
 		if target.Dangling {
-			return DraftResult{}, fmt.Errorf("%s is referenced but not defined in this corpus; linking to it would create a dangling relation", opt.UsedBy)
+			return DraftResult{}, fmt.Errorf("%s is referenced but not defined in this corpus; linking to it would create a dangling relation", usedBy)
+		}
+		// used-by runs from a tool to the actor wielding it. Pointing it at
+		// another tool or a technique produces a relation that parses and means
+		// nothing — and the whole purpose here is contribution-ready output.
+		if !ActorGalaxies[strings.ToLower(target.Galaxy)] {
+			return DraftResult{}, fmt.Errorf(
+				"%s is in galaxy %q, which does not hold threat actors; a used-by relation must point at the actor wielding this, not at another tool or technique",
+				usedBy, target.Galaxy)
 		}
 		confidence := strings.TrimSpace(opt.Confidence)
 		if confidence == "" {
