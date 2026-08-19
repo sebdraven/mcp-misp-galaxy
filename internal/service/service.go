@@ -386,6 +386,12 @@ var ErrCompareOperands = errors.New("comparison needs two uuids")
 // entry.
 var ErrCompareSame = errors.New("cannot compare an entry with itself")
 
+// ErrEmptyQuery is returned when a search is given nothing to look for.
+var ErrEmptyQuery = errors.New("a query is required")
+
+// ErrInvalidSimilarity is returned for a similarity threshold outside [0,1].
+var ErrInvalidSimilarity = errors.New("min_similarity must be a number between 0 and 1")
+
 // ErrCoOccurrenceScope is returned when neither an entry nor a galaxy is given
 // to scope the search.
 var ErrCoOccurrenceScope = errors.New("co-occurrence needs either a uuid or a galaxy to search")
@@ -493,6 +499,64 @@ func (s *Service) Compare(aUUID, bUUID string, opt galaxy.CompareOpts) (galaxy.C
 	// discarded rather than handled twice.
 	cmp, _ := g.Compare(aUUID, bUUID, opt)
 	return cmp, nil
+}
+
+// FuzzyResult carries approximate name matches.
+type FuzzyResult struct {
+	Query         string              `json:"query"`
+	MinSimilarity float64             `json:"min_similarity" jsonschema:"the threshold actually applied"`
+	Scope         []string            `json:"scope,omitempty"`
+	Count         int                 `json:"count"`
+	Matches       []galaxy.FuzzyMatch `json:"matches"`
+	Note          string              `json:"note"`
+}
+
+// Fuzzy finds entries whose names are close to a query without being equal.
+func (s *Service) Fuzzy(q string, galaxies []string, minSimilarity *float64, limit int) (FuzzyResult, error) {
+	g, err := s.graph()
+	if err != nil {
+		return FuzzyResult{}, err
+	}
+	q = strings.TrimSpace(q)
+	if q == "" {
+		return FuzzyResult{}, ErrEmptyQuery
+	}
+
+	threshold := galaxy.FuzzyThreshold
+	if minSimilarity != nil {
+		if math.IsNaN(*minSimilarity) || *minSimilarity < 0 || *minSimilarity > 1 {
+			return FuzzyResult{}, fmt.Errorf("%w (got %v)", ErrInvalidSimilarity, *minSimilarity)
+		}
+		threshold = *minSimilarity
+	}
+	scope := s.scope
+	if len(galaxies) > 0 {
+		scope = normaliseScope(galaxies)
+	}
+
+	matches := g.FuzzyResolve(q, galaxy.FuzzyOpts{
+		Galaxies: scope, MinSimilarity: &threshold, Limit: limit,
+	})
+	res := FuzzyResult{
+		Query: q, MinSimilarity: threshold, Scope: scope,
+		Count: len(matches), Matches: matches,
+	}
+
+	blocked := 0
+	for _, m := range matches {
+		if m.Blocked {
+			blocked++
+		}
+	}
+	switch {
+	case len(matches) == 0:
+		res.Note = "no near names above the threshold; the entry may simply not be in this corpus"
+	case blocked > 0:
+		res.Note = "orthographic proximity is not identity. Some matches are flagged 'blocked': their own catalogue entries disagree on a discriminating attribute, so they are not the same thing however alike the names look. Read the signal breakdown before treating any of these as the same entry"
+	default:
+		res.Note = "orthographic proximity is not identity: APT28 and APT29 are one character apart and are different actors. Check the signal breakdown, and prefer a documented synonym over a close spelling"
+	}
+	return res, nil
 }
 
 // Galaxies lists the galaxies in the checkout.
