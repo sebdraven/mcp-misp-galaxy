@@ -117,9 +117,14 @@ func (g *Graph) FuzzyResolve(q string, opt FuzzyOpts) []FuzzyMatch {
 
 	// Blocking, in the sense the literature uses: a cheap filter before the
 	// expensive comparison. Comparing the query to all 56,000 index keys with
-	// five signals each would be pointless when a length gap alone rules most
-	// of them out.
+	// several signals each would be pointless when a length gap alone rules
+	// most of them out.
+	//
+	// Measured in runes, not bytes: normalise keeps any Unicode letter, so a
+	// Cyrillic or CJK name is two to three bytes per character and would be
+	// filtered out on a length gap it does not have.
 	const maxLenGap = 4
+	queryLen := len([]rune(key))
 
 	seen := map[*Node]FuzzyMatch{}
 	consider := func(n *Node, candidate, indexed string) {

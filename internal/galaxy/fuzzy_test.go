@@ -72,7 +72,7 @@ func TestFuzzyDigitSignalIsDecisive(t *testing.T) {
 	// Verifies the mechanism rather than only its effect: on the string
 	// signals alone the pair is close, and it is the digit signal that pulls
 	// the composite under the floor.
-	sig := scoreName("apt28", "apt29")
+	sig := scoreName("apt28", "apt29", "APT28", "APT29")
 	if sig.JaroWinkler < 0.9 {
 		t.Fatalf("fixture assumption broken: apt28/apt29 should look alike to Jaro-Winkler, got %v",
 			sig.JaroWinkler)
