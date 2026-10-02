@@ -167,6 +167,7 @@ type ResolveResult struct {
 	Ambiguous     bool                    `json:"ambiguous" jsonschema:"more than one candidate matched; do not treat the first as the answer without checking"`
 	Candidates    []galaxy.Candidate      `json:"candidates"`
 	ByGalaxy      []galaxy.CandidateGroup `json:"by_galaxy,omitempty" jsonschema:"the same candidates grouped by galaxy, largest group first"`
+	OutOfScope    []galaxy.ScopeMiss      `json:"out_of_scope,omitempty" jsonschema:"exact name or synonym matches in galaxies the scope excluded. Present means an empty or thin answer is an artefact of the scope, not an absence from the corpus: re-run with those galaxies, or with [\"all\"], before concluding anything"`
 }
 
 // Resolve ranks the entries matching a name. galaxies overrides the service
@@ -196,6 +197,7 @@ func (s *Service) Resolve(q string, galaxies []string, limit int, group bool, no
 	if group {
 		res.ByGalaxy = galaxy.GroupByGalaxy(cands)
 	}
+	res.OutOfScope = g.ExactOutOfScope(q, scope, mode)
 	return res, nil
 }
 
