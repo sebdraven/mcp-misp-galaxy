@@ -908,6 +908,49 @@ func TestActorNeighboursAreNotDemoted(t *testing.T) {
 	}
 }
 
+func TestActorLinkedToAliasesKeepsZeroGroupCount(t *testing.T) {
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters, "mitre-intrusion-set", []map[string]any{
+		{"value": "Group - G0001", "uuid": "is-1", "related": []map[string]any{
+			{"dest-uuid": "ta-1", "type": "similar"},
+			{"dest-uuid": "tg-1", "type": "similar"},
+			{"dest-uuid": "t-1", "type": "uses"},
+		}},
+	})
+	writeCluster(t, clusters, "threat-actor", []map[string]any{
+		{"value": "Group", "uuid": "ta-1"},
+	})
+	writeCluster(t, clusters, "groups", []map[string]any{
+		{"value": "Group", "uuid": "tg-1"},
+	})
+	writeCluster(t, clusters, "mitre-attack-pattern", []map[string]any{
+		{"value": "Technique", "uuid": "t-1"},
+	})
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	for _, uuid := range []string{"is-1", "ta-1", "tg-1"} {
+		n, _ := g.Node(uuid)
+		if n.GroupCount != 0 {
+			t.Errorf("%s: group_count = %d, want 0", uuid, n.GroupCount)
+		}
+	}
+	if top := g.MostGeneric("mitre-intrusion-set", 10); len(top) != 0 {
+		t.Errorf("actor galaxies must not rank as generic, got %+v", top)
+	}
+
+	found := g.Neighbours("t-1", NeighbourOpts{Depth: 2, MaxGroupCount: 1})
+	if !containsUUID(found, "ta-1") {
+		t.Errorf("max_group_count must not block traversal through an actor, got %+v", found)
+	}
+}
+
 func TestZeroGroupCountIsReportedNotOmitted(t *testing.T) {
 	// A missing field and a count of zero read the same way in JSON, and they
 	// mean opposite things here. The field must always be emitted.
