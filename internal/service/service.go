@@ -608,6 +608,13 @@ func (s *Service) MostGeneric(galaxyType string, limit int) (GenericResult, erro
 	if err != nil {
 		return GenericResult{}, err
 	}
+	if galaxy.ActorGalaxies[strings.ToLower(strings.TrimSpace(galaxyType))] {
+		return GenericResult{
+			Galaxy:  galaxyType,
+			Entries: []galaxy.GenericEntry{},
+			Note:    "actor galaxies carry no group_count: genericity measures how many actors use an entry, which does not apply to the actors themselves. Pass a technique, malware or tool galaxy instead",
+		}, nil
+	}
 	entries := g.MostGeneric(galaxyType, limit)
 	return GenericResult{
 		Galaxy:  galaxyType,
