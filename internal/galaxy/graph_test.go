@@ -1283,3 +1283,51 @@ func containsUUID(ns []Neighbour, uuid string) bool {
 	}
 	return false
 }
+
+func TestExactOutOfScope(t *testing.T) {
+	root := t.TempDir()
+	clusters := filepath.Join(root, "clusters")
+	if err := os.MkdirAll(clusters, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeCluster(t, clusters, "threat-actor", []map[string]any{
+		{"value": "Other", "uuid": "ta-1"},
+	})
+	writeCluster(t, clusters, "groups", []map[string]any{
+		{"value": "KillSec", "uuid": "g-1"},
+	})
+	writeCluster(t, clusters, "ransomware", []map[string]any{
+		{"value": "killsec", "uuid": "r-1"},
+		{"value": "Something", "uuid": "r-2", "meta": map[string]any{"synonyms": []string{"Kill-Sec"}}},
+		{"value": "killsec3", "uuid": "r-3"},
+	})
+
+	g, err := Load(root, "deadbeef")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	scope := []string{"threat-actor"}
+	if got := g.Resolve("KillSec", scope, 10); len(got) != 0 {
+		t.Fatalf("fixture: in-scope resolve should be empty, got %+v", got)
+	}
+
+	miss := g.ExactOutOfScope("KillSec", scope, Standard)
+	if len(miss) != 2 {
+		t.Fatalf("ExactOutOfScope = %+v, want 2 galaxies", miss)
+	}
+	if miss[0].Galaxy != "ransomware" || miss[0].Count != 2 {
+		t.Errorf("first group = %+v, want ransomware with count 2", miss[0])
+	}
+	if miss[1].Galaxy != "groups" || miss[1].Count != 1 {
+		t.Errorf("second group = %+v, want groups with count 1", miss[1])
+	}
+
+	if got := g.ExactOutOfScope("KillSec", nil, Standard); got != nil {
+		t.Errorf("no scope means nothing is out of scope, got %+v", got)
+	}
+	full := []string{"threat-actor", "groups", "ransomware"}
+	if got := g.ExactOutOfScope("KillSec", full, Standard); got != nil {
+		t.Errorf("everything in scope, got %+v", got)
+	}
+}
