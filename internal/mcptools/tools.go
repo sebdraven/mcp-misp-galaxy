@@ -150,7 +150,7 @@ type neighboursInput struct {
 	Direction     string   `json:"direction,omitempty" jsonschema:"both (default), out or in"`
 	Types         []string `json:"types,omitempty" jsonschema:"keep only these relation types, e.g. similar, used-by, subtechnique-of"`
 	Galaxies      []string `json:"galaxies,omitempty" jsonschema:"keep only entries from these galaxy types, e.g. ['malpedia'] for malware families or ['threat-actor'] for the actors behind them"`
-	MaxGroupCount int      `json:"max_group_count,omitempty" jsonschema:"keep only entries linked to AT MOST this many threat actors, and do not walk through the others. Inclusive: 5 keeps entries at 5 actors and drops those at 6. This boundary is not the same as the 'generic' flag, which is set from 10 actors upwards — pass 9 to remove everything flagged generic"`
+	MaxGroupCount int      `json:"max_group_count,omitempty" jsonschema:"keep only entries linked to AT MOST this many threat actors, and do not walk through the others. Inclusive: 5 keeps entries at 5 actors and drops those at 6. This boundary is not the same as the 'generic' flag, which is derived per galaxy (90th percentile of its group counts, floor 2, fallback 9 for sparse galaxies) and reported in each result as 'generic_threshold' — pass that value to remove everything flagged generic in a given galaxy"`
 	Limit         int      `json:"limit,omitempty" jsonschema:"max entries returned (default 200)"`
 	WithPaths     bool     `json:"with_paths,omitempty" jsonschema:"include the route taken to reach each entry"`
 	SkipDangling  bool     `json:"skip_dangling,omitempty" jsonschema:"drop entries referenced by a relation but not defined in this checkout"`
