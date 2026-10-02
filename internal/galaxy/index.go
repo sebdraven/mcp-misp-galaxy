@@ -373,3 +373,55 @@ type CandidateGroup struct {
 	Count      int         `json:"count"`
 	Candidates []Candidate `json:"candidates"`
 }
+
+// ScopeMiss is the exact matches for a query in one galaxy the scope excluded.
+type ScopeMiss struct {
+	Galaxy string   `json:"galaxy"`
+	Count  int      `json:"count"`
+	Tags   []string `json:"tags" jsonschema:"canonical MISP tags of the exact matches in this galaxy"`
+}
+
+// ExactOutOfScope reports exact value or synonym matches for q that the scope
+// kept out of the answer.
+func (g *Graph) ExactOutOfScope(q string, galaxies []string, mode Normalisation) []ScopeMiss {
+	scope := scopeSet(galaxies)
+	if scope == nil {
+		return nil
+	}
+
+	fold := normalise
+	index := g.index
+	if mode == Aggressive {
+		fold = normaliseAggressive
+		index = g.indexAggressive
+	}
+
+	key := fold(q)
+	if key == "" {
+		return nil
+	}
+
+	byGalaxy := map[string][]string{}
+	for _, n := range index[key] {
+		if n.Dangling || scope[strings.ToLower(n.Galaxy)] {
+			continue
+		}
+		byGalaxy[n.Galaxy] = append(byGalaxy[n.Galaxy], n.Tag())
+	}
+	if len(byGalaxy) == 0 {
+		return nil
+	}
+
+	out := make([]ScopeMiss, 0, len(byGalaxy))
+	for gx, tags := range byGalaxy {
+		sort.Strings(tags)
+		out = append(out, ScopeMiss{Galaxy: gx, Count: len(tags), Tags: tags})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Galaxy < out[j].Galaxy
+	})
+	return out
+}

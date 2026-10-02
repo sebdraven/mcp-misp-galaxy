@@ -167,6 +167,7 @@ type ResolveResult struct {
 	Ambiguous     bool                    `json:"ambiguous" jsonschema:"more than one candidate matched; do not treat the first as the answer without checking"`
 	Candidates    []galaxy.Candidate      `json:"candidates"`
 	ByGalaxy      []galaxy.CandidateGroup `json:"by_galaxy,omitempty" jsonschema:"the same candidates grouped by galaxy, largest group first"`
+	OutOfScope    []galaxy.ScopeMiss      `json:"out_of_scope,omitempty" jsonschema:"exact name or synonym matches in galaxies the scope excluded. Present means an empty or thin answer is an artefact of the scope, not an absence from the corpus: re-run with those galaxies, or with [\"all\"], before concluding anything"`
 }
 
 // Resolve ranks the entries matching a name. galaxies overrides the service
@@ -196,6 +197,7 @@ func (s *Service) Resolve(q string, galaxies []string, limit int, group bool, no
 	if group {
 		res.ByGalaxy = galaxy.GroupByGalaxy(cands)
 	}
+	res.OutOfScope = g.ExactOutOfScope(q, scope, mode)
 	return res, nil
 }
 
@@ -509,6 +511,7 @@ type FuzzyResult struct {
 	Scope         []string            `json:"scope,omitempty"`
 	Count         int                 `json:"count"`
 	Matches       []galaxy.FuzzyMatch `json:"matches"`
+	OutOfScope    []galaxy.ScopeMiss  `json:"out_of_scope,omitempty" jsonschema:"exact name or synonym matches in galaxies the scope excluded; when present, the name exists as spelt and fuzzy matching is the wrong tool"`
 	Note          string              `json:"note"`
 }
 
@@ -556,6 +559,11 @@ func (s *Service) Fuzzy(q string, galaxies []string, minSimilarity *float64, lim
 		res.Note = "orthographic proximity is not identity. Some matches are flagged 'blocked': their own catalogue entries disagree on a discriminating attribute, so they are not the same thing however alike the names look. Read the signal breakdown before treating any of these as the same entry"
 	default:
 		res.Note = "orthographic proximity is not identity: APT28 and APT29 are one character apart and are different actors. Check the signal breakdown, and prefer a documented synonym over a close spelling"
+	}
+
+	res.OutOfScope = g.ExactOutOfScope(q, scope, galaxy.Standard)
+	if len(res.OutOfScope) > 0 {
+		res.Note = "exact matches exist outside the searched scope (see out_of_scope): the name is in the corpus as spelt, so re-run gx_resolve with those galaxies instead of reading these near matches. " + res.Note
 	}
 	return res, nil
 }
