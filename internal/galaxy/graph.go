@@ -316,8 +316,15 @@ func syntheticKey(galaxyType, value string) string {
 // This is the specificity signal: an entry linked to one actor can serve as a
 // behavioural signature, one linked to dozens cannot. Distinct actors, not
 // distinct edges — a link declared from both sides is one actor, not two.
+//
+// Actor entries stay at 0. Their actor neighbours are aliases of the same
+// group across taxonomies, not users of it.
 func (g *Graph) countGroups() {
 	for _, n := range g.nodes {
+		if ActorGalaxies[strings.ToLower(n.Galaxy)] {
+			n.GroupCount = 0
+			continue
+		}
 		seen := make(map[*Node]bool)
 		for _, e := range undirectedEdges(n) {
 			if e.To == n || seen[e.To] {
