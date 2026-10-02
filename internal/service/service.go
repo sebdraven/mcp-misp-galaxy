@@ -53,6 +53,7 @@ var DefaultScope = []string{
 	"mitre-enterprise-attack-intrusion-set",
 	"mitre-enterprise-attack-tool",
 	"mitre-tool",
+	"mitre-software",
 	"tool",
 	"android",
 	"stalkerware",
