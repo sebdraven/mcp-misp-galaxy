@@ -257,7 +257,7 @@ func Load(root, sourceRef string, opts ...LoadOption) (*Graph, error) {
 		Dangling:    dangling,
 		Revoked:     revoked,
 		Synthetic:   synthetic,
-		Galaxies:    len(g.galaxies),
+		Galaxies:    len(g.Galaxies()),
 		IndexedKeys: len(g.index),
 		SourceRef:   sourceRef,
 		LoadedAt:    time.Now().UTC().Format(time.RFC3339),
