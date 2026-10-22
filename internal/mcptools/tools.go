@@ -61,7 +61,7 @@ func Register(s *mcp.Server, svc *service.Service) {
 	}, r.path)
 
 	mcp.AddTool(s, &mcp.Tool{
-		Name:        "gx_galaxies",
+		Name: "gx_galaxies",
 		Description: "List the galaxies in the loaded corpus with their entry counts and, when their definition declares them, their category and sub_category. " +
 			"Useful to pick a value for the 'galaxy' filter on gx_resolve and gx_neighbors, or a category:<value> / sub_category:<value> selector for 'galaxies'.",
 	}, r.galaxies)
