@@ -63,6 +63,8 @@ type galaxyFile struct {
 	Description string `json:"description"`
 	Namespace   string `json:"namespace"`
 	Icon        string `json:"icon"`
+	Category    string `json:"category"`
+	SubCategory string `json:"sub_category"`
 }
 
 // ---- graph shapes -----------------------------------------------------------
@@ -224,6 +226,8 @@ type GalaxyInfo struct {
 	Name        string `json:"name,omitempty"`
 	Namespace   string `json:"namespace,omitempty"`
 	Description string `json:"description,omitempty"`
+	Category    string `json:"category,omitempty"`
+	SubCategory string `json:"sub_category,omitempty"`
 	Nodes       int    `json:"nodes"`
 }
 
