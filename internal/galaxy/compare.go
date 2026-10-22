@@ -51,6 +51,8 @@ type Comparison struct {
 	Truncated bool `json:"truncated,omitempty"`
 
 	Note string `json:"note,omitempty"`
+
+	UnresolvedScope []string `json:"unresolved_scope,omitempty" jsonschema:"scope entries (galaxy names or category:/sub_category: selectors) that match no galaxy in the loaded corpus; usually a typo — check gx_galaxies for valid names and category values"`
 }
 
 // CompareOpts tunes a comparison.
