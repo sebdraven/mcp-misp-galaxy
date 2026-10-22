@@ -65,7 +65,7 @@ func main() {
 		addr          = flag.String("addr", envOr("GALAXY_ADDR", ":8090"), "listen address for http and rest")
 		noSync        = flag.Bool("no-sync", false, "skip the submodule sync and load whatever is already checked out")
 		progress      = flag.Bool("progress", false, "force the load progress bar even when stderr is not a terminal")
-		scope         = flag.String("scope", envOr("GALAXY_SCOPE", ""), "comma-separated galaxies to search by default; empty uses the built-in CTI scope, \"all\" searches the whole corpus")
+		scope         = flag.String("scope", envOr("GALAXY_SCOPE", ""), "comma-separated galaxies or category:<value> / sub_category:<value> selectors to search by default; empty uses the built-in CTI scope, \"all\" searches the whole corpus")
 		resolveQ      = flag.String("resolve", "", "resolve one name, print the ranked candidates as JSON, and exit")
 		normalisation = flag.String("normalisation", envOr("GALAXY_NORMALISATION", "standard"), "name folding for -resolve: standard or aggressive")
 		showGx        = flag.Bool("galaxies", false, "print the galaxy inventory with entry counts and exit")
@@ -158,11 +158,14 @@ func main() {
 		time.Since(start).Round(time.Millisecond), short(stats.SourceRef),
 		stats.Nodes, stats.Edges, stats.Galaxies, stats.Dangling, stats.Revoked)
 
-	// A galaxy named in the scope but absent from the checkout is almost always
-	// a typo, and it fails silently as "no results" — so say so once at start.
-	if g := holder.Get(); g != nil {
-		for _, want := range svc.Scope() {
-			if !g.HasGalaxy(want) {
+	// A galaxy or selector in the scope that matches nothing in the checkout is
+	// almost always a typo, and it fails silently as "no results" — so say so
+	// once at start.
+	if _, unresolved, err := svc.ResolvedScope(); err == nil {
+		for _, want := range unresolved {
+			if galaxy.IsScopeSelector(want) {
+				log.Printf("warning: scope selector %q matches no galaxy in this checkout", want)
+			} else {
 				log.Printf("warning: scope names galaxy %q, absent or empty in this checkout", want)
 			}
 		}
@@ -183,7 +186,7 @@ func main() {
 		// do not answer it.
 		sort.Slice(gs, func(i, j int) bool { return gs[i].Nodes > gs[j].Nodes })
 		for _, g := range gs {
-			fmt.Printf("%7d  %-42s %s\n", g.Nodes, g.Type, g.Name)
+			fmt.Printf("%7d  %-42s %-12s %-16s %s\n", g.Nodes, g.Type, orDash(g.Category), orDash(g.SubCategory), g.Name)
 		}
 		return
 	}
@@ -283,6 +286,13 @@ func short(hash string) string {
 		return hash[:12]
 	}
 	return hash
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 func envOr(key, def string) string {
