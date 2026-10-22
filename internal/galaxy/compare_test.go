@@ -1,9 +1,11 @@
 package galaxy
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -225,5 +227,25 @@ func TestCompareUnknownEntries(t *testing.T) {
 	}
 	if _, ok := g.Compare("nope", "b-1", CompareOpts{}); ok {
 		t.Error("expected no comparison from an unknown uuid")
+	}
+}
+
+func TestComparisonOmitsEmptyUnresolvedScope(t *testing.T) {
+	g := compareGraph(t)
+	cmp, ok := g.Compare("a-1", "b-1", CompareOpts{})
+	if !ok {
+		t.Fatal("fixture: both entries should exist")
+	}
+	raw, err := json.Marshal(cmp)
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	if strings.Contains(string(raw), "unresolved_scope") {
+		t.Errorf("unresolved_scope should be omitted when empty, got %s", raw)
+	}
+
+	cmp.UnresolvedScope = []string{"category:named_threat"}
+	if raw, _ = json.Marshal(cmp); !strings.Contains(string(raw), `"unresolved_scope":["category:named_threat"]`) {
+		t.Errorf("unresolved_scope should be serialised when set, got %s", raw)
 	}
 }

@@ -76,7 +76,7 @@ losing track of `-root` is the easiest way to get a server that dies at startup.
 
 ```
 bin/mcp-misp-galaxy -stats          # counters and checkout state
-bin/mcp-misp-galaxy -galaxies       # inventory, by size
+bin/mcp-misp-galaxy -galaxies       # inventory, by size, with category and sub_category
 bin/mcp-misp-galaxy -resolve APT28  # ranked candidates as JSON
 ```
 
@@ -100,11 +100,29 @@ bin/mcp-misp-galaxy -scope all -resolve Anthrax
 
 or per request, with the `galaxies` argument.
 
+Besides galaxy names, a scope entry can be a selector on the galaxy
+definitions: `category:<value>` or `sub_category:<value>`, with the values of
+the upstream `galaxy-category` and `galaxy-sub-category` vocabularies.
+Selectors are resolved against the loaded inventory and combine with explicit
+names as a union; `-galaxies` shows what each galaxy declares. A galaxy whose
+definition carries no category is reached by name only.
+
+```
+bin/mcp-misp-galaxy -scope sub_category:actor,malpedia -resolve APT28
+GALAXY_SCOPE=category:named-threat bin/mcp-misp-galaxy -transport rest
+```
+
+The same selectors work in the `galaxies` argument of `gx_resolve`,
+`gx_fuzzy`, `gx_neighbors` and `gx_compare`, and in the REST `galaxy`
+parameter. An entry, name or selector, that matches no galaxy is listed in the
+answer's `unresolved_scope`, whether it came from the call or the server's
+default scope.
+
 **The scope applies to search only, never to traversal.** Searching a name
 across unrelated taxonomies is noise; following a relation someone declared is
 not — the edge exists because a human asserted it. A galaxy named in the scope
-but absent from the checkout is reported at startup, since it would otherwise
-fail silently as "no results".
+but absent from the checkout, or a selector matching no galaxy, is reported at
+startup, since it would otherwise fail silently as "no results".
 
 ## Resolution returns candidates, not an answer
 
@@ -144,7 +162,7 @@ bin/mcp-misp-galaxy -transport rest    # REST API
 | `gx_node` | one entry, meta decoded, relations counted by type |
 | `gx_neighbors` | walk outward, filtered by relation type and galaxy |
 | `gx_path` | shortest relation path between two entries |
-| `gx_galaxies` | inventory with entry counts |
+| `gx_galaxies` | inventory with entry counts, category and sub_category |
 | `gx_status` | graph counters and corpus checkout state |
 
 ### Claude Desktop

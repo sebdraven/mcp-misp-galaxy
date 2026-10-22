@@ -618,6 +618,7 @@ func (g *Graph) loadGalaxyDefs(dir string) {
 			continue // a galaxy with no cluster in this checkout
 		}
 		info.Name, info.Namespace = gf.Name, gf.Namespace
+		info.Category, info.SubCategory = gf.Category, gf.SubCategory
 		if gf.Description != "" {
 			info.Description = gf.Description
 		}

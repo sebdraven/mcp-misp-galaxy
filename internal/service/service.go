@@ -89,8 +89,10 @@ type Service struct {
 // Option configures a Service.
 type Option func(*Service)
 
-// WithScope sets the default galaxies searched by Resolve. A single entry
-// equal to ScopeAll disables scoping.
+// WithScope sets the default galaxies searched by Resolve. Entries are galaxy
+// types or category:<value> / sub_category:<value> selectors, resolved against
+// the live graph at query time. A single entry equal to ScopeAll disables
+// scoping.
 func WithScope(galaxies []string) Option {
 	return func(s *Service) { s.scope = normaliseScope(galaxies) }
 }
@@ -116,8 +118,32 @@ func New(h *galaxy.Holder, mgr *corpus.Manager, opts ...Option) *Service {
 	return s
 }
 
-// Scope returns the default galaxy scope in effect.
+// Scope returns the default galaxy scope in effect, selectors unexpanded.
 func (s *Service) Scope() []string { return s.scope }
+
+// ResolvedScope expands the default scope against the live graph and reports
+// the entries that match no galaxy.
+func (s *Service) ResolvedScope() (galaxies, unresolved []string, err error) {
+	g, err := s.graph()
+	if err != nil {
+		return nil, nil, err
+	}
+	galaxies, unresolved = g.ExpandScope(s.scope)
+	return galaxies, unresolved, nil
+}
+
+// scopeFor returns the galaxies a search covers: the call's own scope when
+// given, the service default otherwise, with selectors expanded. unresolved
+// lists the entries that match no galaxy.
+func (s *Service) scopeFor(g *galaxy.Graph, galaxies []string) (scope, unresolved []string) {
+	scope = s.scope
+	if len(galaxies) > 0 {
+		scope = normaliseScope(galaxies)
+	}
+	return g.ExpandScope(scope)
+}
+
+const unresolvedScopeNote = "some scope entries match no galaxy in this corpus (see unresolved_scope), so an empty or thin answer proves nothing. "
 
 // normaliseScope resolves the ScopeAll sentinel to nil (no restriction).
 func normaliseScope(in []string) []string {
@@ -160,14 +186,15 @@ func parseNormalisation(s string) (galaxy.Normalisation, error) {
 
 // ResolveResult carries the ranked candidates for a name.
 type ResolveResult struct {
-	Query         string                  `json:"query"`
-	Normalisation string                  `json:"normalisation" jsonschema:"which name-folding was used: standard or aggressive"`
-	Scope         []string                `json:"scope,omitempty" jsonschema:"galaxies actually searched; absent means the whole corpus"`
-	Count         int                     `json:"count"`
-	Ambiguous     bool                    `json:"ambiguous" jsonschema:"more than one candidate matched; do not treat the first as the answer without checking"`
-	Candidates    []galaxy.Candidate      `json:"candidates"`
-	ByGalaxy      []galaxy.CandidateGroup `json:"by_galaxy,omitempty" jsonschema:"the same candidates grouped by galaxy, largest group first"`
-	OutOfScope    []galaxy.ScopeMiss      `json:"out_of_scope,omitempty" jsonschema:"exact name or synonym matches in galaxies the scope excluded. Present means an empty or thin answer is an artefact of the scope, not an absence from the corpus: re-run with those galaxies, or with [\"all\"], before concluding anything"`
+	Query           string                  `json:"query"`
+	Normalisation   string                  `json:"normalisation" jsonschema:"which name-folding was used: standard or aggressive"`
+	Scope           []string                `json:"scope,omitempty" jsonschema:"galaxies actually searched; absent means the whole corpus"`
+	Count           int                     `json:"count"`
+	Ambiguous       bool                    `json:"ambiguous" jsonschema:"more than one candidate matched; do not treat the first as the answer without checking"`
+	Candidates      []galaxy.Candidate      `json:"candidates"`
+	ByGalaxy        []galaxy.CandidateGroup `json:"by_galaxy,omitempty" jsonschema:"the same candidates grouped by galaxy, largest group first"`
+	OutOfScope      []galaxy.ScopeMiss      `json:"out_of_scope,omitempty" jsonschema:"exact name or synonym matches in galaxies the scope excluded. Present means an empty or thin answer is an artefact of the scope, not an absence from the corpus: re-run with those galaxies, or with [\"all\"], before concluding anything"`
+	UnresolvedScope []string                `json:"unresolved_scope,omitempty" jsonschema:"scope entries (galaxy names or category:/sub_category: selectors) that match no galaxy in the loaded corpus; usually a typo — check gx_galaxies for valid names and category values"`
 }
 
 // Resolve ranks the entries matching a name. galaxies overrides the service
@@ -177,22 +204,20 @@ func (s *Service) Resolve(q string, galaxies []string, limit int, group bool, no
 	if err != nil {
 		return ResolveResult{}, err
 	}
-	scope := s.scope
-	if len(galaxies) > 0 {
-		scope = normaliseScope(galaxies)
-	}
+	scope, unresolved := s.scopeFor(g, galaxies)
 	mode, err := parseNormalisation(normalisation)
 	if err != nil {
 		return ResolveResult{}, err
 	}
 	cands := g.ResolveWith(q, scope, limit, mode)
 	res := ResolveResult{
-		Query:         q,
-		Normalisation: string(mode),
-		Scope:         scope,
-		Count:         len(cands),
-		Ambiguous:     len(cands) > 1,
-		Candidates:    cands,
+		Query:           q,
+		Normalisation:   string(mode),
+		Scope:           scope,
+		Count:           len(cands),
+		Ambiguous:       len(cands) > 1,
+		Candidates:      cands,
+		UnresolvedScope: unresolved,
 	}
 	if group {
 		res.ByGalaxy = galaxy.GroupByGalaxy(cands)
@@ -256,10 +281,11 @@ func (s *Service) Node(uuid string) (NodeDetail, error) {
 
 // NeighboursResult is a traversal outcome.
 type NeighboursResult struct {
-	Origin     string             `json:"origin"`
-	Depth      int                `json:"depth"`
-	Count      int                `json:"count"`
-	Neighbours []galaxy.Neighbour `json:"neighbours"`
+	Origin          string             `json:"origin"`
+	Depth           int                `json:"depth"`
+	Count           int                `json:"count"`
+	Neighbours      []galaxy.Neighbour `json:"neighbours"`
+	UnresolvedScope []string           `json:"unresolved_scope,omitempty" jsonschema:"scope entries (galaxy names or category:/sub_category: selectors) that match no galaxy in the loaded corpus; usually a typo — check gx_galaxies for valid names and category values"`
 }
 
 // Neighbours walks outward from a node.
@@ -271,12 +297,17 @@ func (s *Service) Neighbours(uuid string, opt galaxy.NeighbourOpts) (NeighboursR
 	if _, ok := g.Node(uuid); !ok {
 		return NeighboursResult{}, fmt.Errorf("%w: %s", ErrUnknownNode, uuid)
 	}
+	var unresolved []string
+	opt.Galaxies, unresolved = g.ExpandScope(opt.Galaxies)
 	ns := g.Neighbours(uuid, opt)
 	depth := opt.Depth
 	if depth <= 0 {
 		depth = 1
 	}
-	return NeighboursResult{Origin: uuid, Depth: depth, Count: len(ns), Neighbours: ns}, nil
+	return NeighboursResult{
+		Origin: uuid, Depth: depth, Count: len(ns), Neighbours: ns,
+		UnresolvedScope: unresolved,
+	}, nil
 }
 
 // PathResult is a route between two entries.
@@ -498,21 +529,25 @@ func (s *Service) Compare(aUUID, bUUID string, opt galaxy.CompareOpts) (galaxy.C
 			return galaxy.Comparison{}, fmt.Errorf("%w: %s", ErrUnknownNode, uuid)
 		}
 	}
+	var unresolved []string
+	opt.Galaxies, unresolved = g.ExpandScope(opt.Galaxies)
 	// Both nodes exist, so the graph can only succeed from here; the boolean is
 	// discarded rather than handled twice.
 	cmp, _ := g.Compare(aUUID, bUUID, opt)
+	cmp.UnresolvedScope = unresolved
 	return cmp, nil
 }
 
 // FuzzyResult carries approximate name matches.
 type FuzzyResult struct {
-	Query         string              `json:"query"`
-	MinSimilarity float64             `json:"min_similarity" jsonschema:"the threshold actually applied"`
-	Scope         []string            `json:"scope,omitempty"`
-	Count         int                 `json:"count"`
-	Matches       []galaxy.FuzzyMatch `json:"matches"`
-	OutOfScope    []galaxy.ScopeMiss  `json:"out_of_scope,omitempty" jsonschema:"exact name or synonym matches in galaxies the scope excluded; when present, the name exists as spelt and fuzzy matching is the wrong tool"`
-	Note          string              `json:"note"`
+	Query           string              `json:"query"`
+	MinSimilarity   float64             `json:"min_similarity" jsonschema:"the threshold actually applied"`
+	Scope           []string            `json:"scope,omitempty"`
+	Count           int                 `json:"count"`
+	Matches         []galaxy.FuzzyMatch `json:"matches"`
+	OutOfScope      []galaxy.ScopeMiss  `json:"out_of_scope,omitempty" jsonschema:"exact name or synonym matches in galaxies the scope excluded; when present, the name exists as spelt and fuzzy matching is the wrong tool"`
+	UnresolvedScope []string            `json:"unresolved_scope,omitempty" jsonschema:"scope entries (galaxy names or category:/sub_category: selectors) that match no galaxy in the loaded corpus; usually a typo — check gx_galaxies for valid names and category values"`
+	Note            string              `json:"note"`
 }
 
 // Fuzzy finds entries whose names are close to a query without being equal.
@@ -533,10 +568,7 @@ func (s *Service) Fuzzy(q string, galaxies []string, minSimilarity *float64, lim
 		}
 		threshold = *minSimilarity
 	}
-	scope := s.scope
-	if len(galaxies) > 0 {
-		scope = normaliseScope(galaxies)
-	}
+	scope, unresolved := s.scopeFor(g, galaxies)
 
 	matches := g.FuzzyResolve(q, galaxy.FuzzyOpts{
 		Galaxies: scope, MinSimilarity: &threshold, Limit: limit,
@@ -544,6 +576,7 @@ func (s *Service) Fuzzy(q string, galaxies []string, minSimilarity *float64, lim
 	res := FuzzyResult{
 		Query: q, MinSimilarity: threshold, Scope: scope,
 		Count: len(matches), Matches: matches,
+		UnresolvedScope: unresolved,
 	}
 
 	blocked := 0
@@ -564,6 +597,9 @@ func (s *Service) Fuzzy(q string, galaxies []string, minSimilarity *float64, lim
 	res.OutOfScope = g.ExactOutOfScope(q, scope, galaxy.Standard)
 	if len(res.OutOfScope) > 0 {
 		res.Note = "exact matches exist outside the searched scope (see out_of_scope): the name is in the corpus as spelt, so re-run gx_resolve with those galaxies instead of reading these near matches. " + res.Note
+	}
+	if len(unresolved) > 0 {
+		res.Note = unresolvedScopeNote + res.Note
 	}
 	return res, nil
 }
