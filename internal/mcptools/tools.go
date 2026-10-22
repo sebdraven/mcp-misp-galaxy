@@ -35,6 +35,7 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"(firearms, culture collections, economic activity codes) that would otherwise pollute results. " +
 			"The 'scope' field of the answer says what was actually searched. " +
 			"When 'out_of_scope' is present, exact matches exist in galaxies the scope excluded: re-run with them before concluding a name is absent from the corpus. " +
+			"When 'unresolved_scope' is present, some scope entries match no galaxy (usually a typo; see gx_galaxies), so an empty answer proves nothing. " +
 			"Entries the corpus has deprecated are still returned, flagged 'revoked' and ranked last. " +
 			"Every result carries a 'tag': the canonical MISP galaxy tag, which is what attaches to a MISP event — quote that rather than the uuid when the answer is going anywhere near MISP.",
 	}, r.resolve)
@@ -61,7 +62,8 @@ func Register(s *mcp.Server, svc *service.Service) {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "gx_galaxies",
-		Description: "List the galaxies in the loaded corpus with their entry counts. Useful to pick a value for the 'galaxy' filter on gx_resolve and gx_neighbors.",
+		Description: "List the galaxies in the loaded corpus with their entry counts and, when their definition declares them, their category and sub_category. " +
+			"Useful to pick a value for the 'galaxy' filter on gx_resolve and gx_neighbors, or a category:<value> / sub_category:<value> selector for 'galaxies'.",
 	}, r.galaxies)
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -78,7 +80,8 @@ func Register(s *mcp.Server, svc *service.Service) {
 			"Use it when gx_resolve returns nothing and you suspect a spelling problem, not as a way to discover related entities. " +
 			"Orthographic proximity is NOT identity, and in this corpus it is often the opposite: APT28 and APT29 are one character apart and are different actors. " +
 			"Every match carries a per-signal breakdown — read it rather than the score alone, and treat a match resting on edit distance with disagreeing digits as a warning rather than a find. " +
-			"Matches flagged 'blocked' have catalogue entries that disagree on a discriminating attribute such as attributed country; no similarity score overrides that.",
+			"Matches flagged 'blocked' have catalogue entries that disagree on a discriminating attribute such as attributed country; no similarity score overrides that. " +
+			"When 'unresolved_scope' is present, some scope entries match no galaxy, so an empty answer proves nothing.",
 	}, r.fuzzy)
 
 	mcp.AddTool(s, &mcp.Tool{
@@ -135,7 +138,7 @@ type registry struct{ svc *service.Service }
 
 type resolveInput struct {
 	Name          string   `json:"name" jsonschema:"the name to resolve; any vendor naming convention, partial names and synonyms all work"`
-	Galaxies      []string `json:"galaxies,omitempty" jsonschema:"restrict to these galaxy types, e.g. threat-actor, malpedia, mitre-attack-pattern, android, stalkerware. Omit to use the server's CTI scope; pass [\"all\"] to search the whole corpus including its non-threat taxonomies"`
+	Galaxies      []string `json:"galaxies,omitempty" jsonschema:"restrict to these galaxy types, e.g. threat-actor, malpedia, mitre-attack-pattern, android, stalkerware. Entries of the form category:<value> or sub_category:<value>, e.g. sub_category:actor, select every galaxy whose definition declares that value (see gx_galaxies) and combine with explicit names. Omit to use the server's CTI scope; pass [\"all\"] to search the whole corpus including its non-threat taxonomies"`
 	Limit         int      `json:"limit,omitempty" jsonschema:"max candidates (default 20)"`
 	Group         bool     `json:"group,omitempty" jsonschema:"also return the candidates grouped by galaxy, which shows how many naming conventions cover this name"`
 	Normalisation string   `json:"normalisation,omitempty" jsonschema:"how names are folded before matching. 'standard' (default) ignores case and punctuation, so APT28 and APT-28 match. 'aggressive' also strips MITRE id suffixes, platform prefixes, collective words like Group, and trailing vendor names — so win.icefog matches Icefog and 'LightSpy - S1185' matches LightSpy. Aggressive finds more and merges some entries that are not the same thing; run both and compare when it matters"`
@@ -150,7 +153,7 @@ type neighboursInput struct {
 	Depth         int      `json:"depth,omitempty" jsonschema:"hops to walk (default 1, capped at 4); 2 already spans malware to actor to technique"`
 	Direction     string   `json:"direction,omitempty" jsonschema:"both (default), out or in"`
 	Types         []string `json:"types,omitempty" jsonschema:"keep only these relation types, e.g. similar, used-by, subtechnique-of"`
-	Galaxies      []string `json:"galaxies,omitempty" jsonschema:"keep only entries from these galaxy types, e.g. ['malpedia'] for malware families or ['threat-actor'] for the actors behind them"`
+	Galaxies      []string `json:"galaxies,omitempty" jsonschema:"keep only entries from these galaxy types, e.g. ['malpedia'] for malware families or ['threat-actor'] for the actors behind them. category:<value> and sub_category:<value> selectors are accepted too"`
 	MaxGroupCount int      `json:"max_group_count,omitempty" jsonschema:"keep only entries linked to AT MOST this many threat actors, and do not walk through the others. Inclusive: 5 keeps entries at 5 actors and drops those at 6. This boundary is not the same as the 'generic' flag, which is derived per galaxy (90th percentile of its group counts, floor 2, fallback 9 for sparse galaxies) and reported in each result as 'generic_threshold' — pass that value to remove everything flagged generic in a given galaxy"`
 	Limit         int      `json:"limit,omitempty" jsonschema:"max entries returned (default 200)"`
 	WithPaths     bool     `json:"with_paths,omitempty" jsonschema:"include the route taken to reach each entry"`
@@ -169,7 +172,7 @@ type draftInput struct {
 
 type fuzzyInput struct {
 	Name          string   `json:"name" jsonschema:"the name to look for approximately"`
-	Galaxies      []string `json:"galaxies,omitempty" jsonschema:"restrict to these galaxy types; omit to use the server's CTI scope"`
+	Galaxies      []string `json:"galaxies,omitempty" jsonschema:"restrict to these galaxy types or category:<value> / sub_category:<value> selectors; omit to use the server's CTI scope"`
 	MinSimilarity *float64 `json:"min_similarity,omitempty" jsonschema:"minimum composite similarity, 0 to 1. Omit for the default of 0.85, which is deliberately strict: actor names are short and share heavy prefixes by convention, so a lower floor turns every numbered family into a cluster of look-alikes"`
 	Limit         int      `json:"limit,omitempty" jsonschema:"max matches to return (default 20)"`
 }
@@ -178,7 +181,7 @@ type compareInput struct {
 	A              string   `json:"a" jsonschema:"first entry UUID, as returned by gx_resolve"`
 	B              string   `json:"b" jsonschema:"second entry UUID"`
 	Depth          int      `json:"depth,omitempty" jsonschema:"hops to include on each side (default 1, capped at 4)"`
-	Galaxies       []string `json:"galaxies,omitempty" jsonschema:"restrict the comparison to certain kinds of neighbour, e.g. ['mitre-malware'] to compare tooling alone"`
+	Galaxies       []string `json:"galaxies,omitempty" jsonschema:"restrict the comparison to certain kinds of neighbour, e.g. ['mitre-malware'] to compare tooling alone. category:<value> and sub_category:<value> selectors are accepted too"`
 	IncludeGeneric bool     `json:"include_generic,omitempty" jsonschema:"keep widely-shared entries in the comparison. Off by default: including them inflates similarity for every pair, since the behaviours everyone shares dominate the overlap"`
 	Limit          int      `json:"limit,omitempty" jsonschema:"max entries listed per section (default 100)"`
 }
