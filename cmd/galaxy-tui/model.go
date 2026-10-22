@@ -90,9 +90,10 @@ func newModel(svc *service.Service, version string) model {
 	ti.CharLimit = 120
 	ti.Focus()
 
+	scope, _, _ := svc.ResolvedScope()
 	return model{
 		svc:       svc,
-		scope:     svc.Scope(),
+		scope:     scope,
 		sourceRef: svc.Status().Stats.SourceRef,
 		version:   version,
 		input:     ti,
